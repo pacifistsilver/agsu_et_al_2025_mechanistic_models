@@ -36,12 +36,17 @@ def simulate_sox2_with_sliding(state_parameters, state_variables, t_max):
     t = 0.0
     
     # Unpack parameters (Added k_slide at the end)
-    k_prod_s, k_deg_s, k_prod_m, k_deg_m, k_bind, k_unbind, k_slide = state_variables
+    k_prod_s, k_deg_s, k_prod_m, k_deg_m, k_bind, k_unbind, k_hop, lambda_hop = state_variables
     
     # 50 nucleosomes: 0 = Unbound, 1 = Bound
     nucleosome_array = np.zeros(50, dtype=np.int8)
     state = np.array(state_parameters, dtype=np.int32)
     
+    indices = np.arange(50)
+    dist_matrix = np.abs(indices[:, None] - indices[None, :])
+    kernel_matrix = np.exp(-dist_matrix / lambda_hop)
+    np.fill_diagonal(kernel_matrix, 0.0)
+
     # STOICHIOMETRY MATRIX
     # Rows: [sox2_free, sox2_bound, mrna_count]
     # Cols: [prod_s, bind, deg_s, unbind, prod_m, deg_m, slide_left, slide_right]
@@ -58,28 +63,22 @@ def simulate_sox2_with_sliding(state_parameters, state_variables, t_max):
     while t < t_max:
         sox2_free, sox2_bound, mrna_count = state
         
+        bound_vec = (nucleosome_array == 1).astype(float)
+        empty_vec = (nucleosome_array == 0).astype(float)
         # Calculate Bulk Propensities
         unbound_nucleosomes = np.sum(nucleosome_array == 0)
         bound_nucleosomes = np.sum(nucleosome_array == 1)
-        # can_slide_right[i] is True if site i is Bound (1) AND site i+1 is Unbound (0)
-        can_slide_right = (nucleosome_array[:-1] == 1) & (nucleosome_array[1:] == 0)
-        # can_slide_left[i] is True if site i+1 is Bound (1) AND site i is Unbound (0)
-        can_slide_left = (nucleosome_array[1:] == 1) & (nucleosome_array[:-1] == 0)
-        hop_probability = (1/z) * e**-(i: j/ lambda)
+        P_matrix = kernel_matrix * bound_vec[:, None] * empty_vec[None, :]        
+        total_hop_weight = np.sum(P_matrix)
         
-        num_slide_right = np.sum(can_slide_right)
-        num_slide_left = np.sum(can_slide_left)
         propensities = np.array([
             k_prod_s,                                 # 0: prod_s
             k_bind * sox2_free * unbound_nucleosomes, # 1: bind
             k_deg_s * sox2_free,                      # 2: deg_s
-            k_unbind * bound_nucleosomes,             # 3: unbind
+            k_unbind * sox2_bound,             # 3: unbind
             k_prod_m * sox2_bound,                    # 4: prod_m
             k_deg_m * mrna_count,                     # 5: deg_m
-            k_slide * num_slide_left,                 # 6: slide_left
-            k_slide * num_slide_right,                 # 7: slide_right
-            k_unbind * 
-        ])
+            k_hop * total_hop_weight        ])
         
         total_prop = np.sum(propensities)
         if total_prop == 0:
@@ -94,30 +93,24 @@ def simulate_sox2_with_sliding(state_parameters, state_variables, t_max):
         reaction_index = np.searchsorted(cumulative_props, r2 * total_prop)
         state += stoichiometry_matrix[:, reaction_index]
         
-        # Spatial Array Updates
-        if reaction_index == 1: # Bind
+        if reaction_index == 1: # bind reaction
             available = np.where(nucleosome_array == 0)[0]
             nucleosome_array[np.random.choice(available)] = 1
             
-        elif reaction_index == 3: # Unbind
+        elif reaction_index == 3: # unbind reaction
             bound = np.where(nucleosome_array == 1)[0]
             nucleosome_array[np.random.choice(bound)] = 0
             
-        elif reaction_index == 6: # Slide Left
-            # Find an index 'i' where site i+1 is Bound and site i is Unbound
-            valid_indices = np.where(can_slide_left)[0]
-            target = np.random.choice(valid_indices)
-            nucleosome_array[target + 1] = 0 # Protein leaves
-            nucleosome_array[target] = 1     # Protein arrives
-            
-        elif reaction_index == 7: # Slide Right
-            # Find an index 'i' where site i is Bound and site i+1 is Unbound
-            valid_indices = np.where(can_slide_right)[0]
-            target = np.random.choice(valid_indices)
-            nucleosome_array[target] = 0     # Protein leaves
-            nucleosome_array[target + 1] = 1 # Protein arrives
-        
-        # Record history
+        elif reaction_index == 6: # hop reaction
+                    # flatten p_matrix into 1d array
+                    flat_probs = P_matrix.ravel() / total_hop_weight
+                    # select specific transition based on probability
+                    chosen_flat_idx = np.random.choice(50 * 50, p=flat_probs)
+                    # convert said index into a 2d grid
+                    source_idx, target_idx = np.unravel_index(chosen_flat_idx, (50, 50))
+                    
+                    nucleosome_array[source_idx] = 0
+                    nucleosome_array[target_idx] = 1        
         times.append(t)
         bulk_states.append(state.copy())
         spatial_states.append(nucleosome_array.copy())
@@ -125,11 +118,27 @@ def simulate_sox2_with_sliding(state_parameters, state_variables, t_max):
     return times, np.array(bulk_states), np.array(spatial_states)
 
 t_max = 500.0      
-sox2_model_parameters = [1, 0, 0]
-sox2_model_variables = [0, 0.0, 1, 0.01, 1, 0.1, 1]
-#k_prod_s, k_deg_s, k_prod_m, k_deg_m, k_bind, k_unbind, k_slide
+sox2_model_variables = {
+    "k_prod_s": 0,
+    "k_deg_s": 0,
+    "k_prod_m": 1,
+    "k_deg_m": 0.01,
+    "k_bind": 1,
+    "k_unbind": 0.01,
+    "k_hop": 1,
+    "lambda_hop": 2
+}
+sox2_model_parameters = {
+    "sox2_free": 1,
+    "sox2_bound": 0,
+    "mrna": 0
+}
 
-times, bulk_states, spatial_states = simulate_sox2_with_sliding(sox2_model_parameters, sox2_model_variables, t_max)
+sox2_simulation_parameters = [sox2_model_parameters[key] for key in sox2_model_parameters]
+sox2_simulation_variables = [sox2_model_variables[key] for key in sox2_model_variables]
+#k_prod_s, k_deg_s, k_prod_m, k_deg_m, k_bind, k_unbind, k_hop, lambda_hop
+
+times, bulk_states, spatial_states = simulate_sox2_with_sliding(sox2_simulation_parameters, sox2_simulation_variables, t_max)
 times_array = np.array(times)
 bulk_history = np.array(bulk_states)     
 spatial_history = np.array(spatial_states) 
