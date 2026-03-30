@@ -1,1 +1,3 @@
-# Srinjan_Modelling
+# Stochastic Modelling for SB-RPC Joint Lab Project
+
+
