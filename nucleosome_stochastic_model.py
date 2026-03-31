@@ -54,7 +54,7 @@ class ClusterModel():
         plt.legend()
         plt.tight_layout()
         plt.savefig('seaborn_mrna_plot.png')
-
+    
     def run_sox2_sim(self):
         t = 0.0
         state_variables = self.sox2_model_variables
@@ -63,15 +63,16 @@ class ClusterModel():
         # Unpack parameters (Added k_slide at the end)
         k_prod_s, k_deg_s, k_prod_m, k_deg_m, k_bind, k_unbind, k_hop, lambda_hop = state_variables
         
-        # 50 nucleosomes: 0 = Unbound, 1 = Bound
-        nucleosome_array = np.zeros(50, dtype=np.int8)
+        # 50 binding sites: 0 = Unbound, 1 = Bound
+        # new state: two sites can be bound at the same time when sox2 branches over
+        binding_sites_array = np.zeros(50, dtype=np.int8)
         state = np.array(state_parameters, dtype=np.int32)
-        
+        bridged_to = np.full(50, -1, dtype=np.int8)
         indices = np.arange(50)
         # initialise 2d matrix where rwo and columns are there corresponding nucleosome number
         # lambda - hopping distance
         dist_matrix = np.abs(indices[:, None] - indices[None, :]) 
-        # probability of hopping to surrounding nucleosomes described as an exponential decay curve.
+        # probability of hopping to surrounding sites described as an exponential decay curve.
         kernel_matrix = np.exp(-dist_matrix / lambda_hop)
         np.fill_diagonal(kernel_matrix, 0.0)
 
@@ -86,21 +87,27 @@ class ClusterModel():
         
         self.times = [0.0]
         self.bulk_states = [state.copy()]                  
-        self.spatial_states = [nucleosome_array.copy()]    
+        self.spatial_states = [binding_sites_array.copy()]    
+        self.hop_history = []
 
+        
+        
+        # issue: need to update bridged_to array at the end, ensure sox2 isnt accidently created when unbound is called, and more
         while t < t_max:
             sox2_free, sox2_bound, mrna_count = state
             
-            bound_vec = (nucleosome_array == 1).astype(float)
-            empty_vec = (nucleosome_array == 0).astype(float)
+            bound_vec = ((binding_sites_array == 1) & (bridged_to == -1)).astype(float)
+            empty_vec = (binding_sites_array == 0).astype(float)
             # Calculate Bulk Propensities
-            unbound_nucleosomes = np.sum(nucleosome_array == 0)
-            bound_nucleosomes = np.sum(nucleosome_array == 1)
+            unbound_nucleosomes = np.sum(binding_sites_array == 0)
+            bound_nucleosomes = np.sum(binding_sites_array == 1)
             # p_matrix contains all valid weights of a molecule moving from i to j nucleosome
             # removes all other points where j is bound or i is empty. 
             P_matrix = kernel_matrix * bound_vec[:, None] * empty_vec[None, :]  
             # summing all valid weights.
             total_hop_weight = np.sum(P_matrix)
+            num_bridged_sites = np.sum(bridged_to != -1)
+            num_bridges = num_bridged_sites // 2
             
             propensities = np.array([
                 k_prod_s,                                 # 0: prod_s
@@ -109,7 +116,8 @@ class ClusterModel():
                 k_unbind * sox2_bound,             # 3: unbind
                 k_prod_m * sox2_bound,                    # 4: prod_m
                 k_deg_m * mrna_count,                     # 5: deg_m
-                k_hop * total_hop_weight        ])
+                k_hop * total_hop_weight,
+                ])
             
             total_prop = np.sum(propensities)
             if total_prop == 0:
@@ -125,26 +133,58 @@ class ClusterModel():
             state += stoichiometry_matrix[:, reaction_index]
             
             if reaction_index == 1: # bind reaction
-                available = np.where(nucleosome_array == 0)[0]
-                nucleosome_array[np.random.choice(available)] = 1
+                available = np.where(binding_sites_array == 0)[0]
+                binding_sites_array[np.random.choice(available)] = 1
                 
             elif reaction_index == 3: # unbind reaction
-                bound = np.where(nucleosome_array == 1)[0]
-                nucleosome_array[np.random.choice(bound)] = 0
+                bound = np.where((binding_sites_array == 1) & (bridged_to == -1))[0]
+                binding_sites_array[np.random.choice(bound)] = 0
                 
-            elif reaction_index == 6: # hop reaction
+            elif reaction_index == 6: # pair reaction
                         # flatten p_matrix into 1d array
                         flat_probs = P_matrix.ravel() / total_hop_weight
                         # select specific transition based on probability
+                        # todo: need to change 50 x 50 to follow size of binding_site_array
                         chosen_flat_idx = np.random.choice(50 * 50, p=flat_probs)
-                        # convert said index into a 2d grid
+                        # convert said index into a 2d array
                         source_idx, target_idx = np.unravel_index(chosen_flat_idx, (50, 50))
                         
-                        nucleosome_array[source_idx] = 0
-                        nucleosome_array[target_idx] = 1        
+                        # need to add a state where it is hopped to another site, but also it also remains at the original site as well.
+                        # so effectively 1 sox2 can occupy two sites at once. 
+                        # separate sox2 array?
+                        # track where sox2 is bound and that it is the same molecule. 
+                        # sox2 when bound to two sites cannot hop to another site.
+                        # or.. add a rule where you track where and when a hop has occured 
+                        # you can feed this into the list of valid transitions
+                        binding_sites_array[source_idx] = 1
+                        binding_sites_array[target_idx] = 1
+                        bridged_to[source_idx] = target_idx
+                        bridged_to[target_idx] = source_idx
+                        self.hop_history.append([source_idx, target_idx])
+            
+            elif reaction_index == 7: # RESOLVE BRIDGE (Complete Hop)
+                # Find all sites that are currently part of a bridge
+                bridged_indices = np.where(bridged_to != -1)[0]
+                
+                # Randomly pick ONE of those feet to let go of the DNA
+                foot_to_release = np.random.choice(bridged_indices)
+                
+                # Find the partner foot (the one that stays bound)
+                partner_foot = bridged_to[foot_to_release]
+                
+                # The released site becomes empty
+                binding_sites_array[foot_to_release] = 0
+                
+                # Break the link between them (both become -1)
+                bridged_to[foot_to_release] = -1
+                bridged_to[partner_foot] = -1
+                
+                # If foot_to_release was the original source, the molecule successfully hopped to partner_foot!
+                # If foot_to_release was the target, the hop failed and the molecule stayed at the source.
             self.times.append(t)
             self.bulk_states.append(state.copy())
-            self.spatial_states.append(nucleosome_array.copy())
+            self.spatial_states.append(binding_sites_array.copy())
+            print(self.hop_history)
           
         return self.times, np.array(self.bulk_states), np.array(self.spatial_states)
 
