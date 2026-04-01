@@ -105,5 +105,6 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
-# plots
+# plots and logs
 *.png
+*.txt
