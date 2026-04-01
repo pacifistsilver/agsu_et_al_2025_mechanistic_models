@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+import json
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
 
@@ -54,7 +55,16 @@ class ClusterModel():
         plt.legend()
         plt.tight_layout()
         plt.savefig('seaborn_mrna_plot.png')
-    
+        
+    # return residence time for each site i.e. how long is each index bound for?
+    # t1. calculate time spent bound generally   
+    # t2. calculate time spent bound for specific states
+    def return_residence_time(self):
+        # take time spent in the state subtract the next state
+        # taking the last state, subtract ts from tmax time
+        # note: all valuse in scientific notation e.g. 1 is 1.0x10**1
+        np.savetxt("time-log.txt", self.residence_time_states)
+
     def run_sox2_sim(self):
         t = 0.0
         state_variables = self.sox2_model_variables
@@ -87,8 +97,8 @@ class ClusterModel():
         
         self.times = [0.0]
         self.bulk_states = [state.copy()]                  
-        self.spatial_states = [binding_sites_array.copy()]    
-        self.hop_history = []
+        self.spatial_states = [nucleosome_array.copy()]    
+        self.residence_time_states = []
 
         
         
@@ -113,10 +123,10 @@ class ClusterModel():
                 k_prod_s,                                 # 0: prod_s
                 k_bind * sox2_free * unbound_nucleosomes, # 1: bind
                 k_deg_s * sox2_free,                      # 2: deg_s
-                k_unbind * sox2_bound,             # 3: unbind
+                k_unbind * sox2_bound,                    # 3: unbind
                 k_prod_m * sox2_bound,                    # 4: prod_m
                 k_deg_m * mrna_count,                     # 5: deg_m
-                k_hop * total_hop_weight,
+                k_hop * total_hop_weight                  # 6: hop
                 ])
             
             total_prop = np.sum(propensities)
@@ -196,7 +206,7 @@ sox2_model_variables = {
     "k_deg_m": 0.01,
     "k_bind": 1,
     "k_unbind": 0.01,
-    "k_hop": 1,
+    "k_hop": 0,
     "lambda_hop": 1
 }
 sox2_model_parameters = {
@@ -213,3 +223,4 @@ model_call = ClusterModel(t_max, sox2_simulation_parameters, sox2_simulation_var
 ClusterModel.run_sox2_sim(model_call)
 ClusterModel.plot_mrna_history(model_call)
 ClusterModel.plot_nucleosome_occupancy_history(model_call)
+ClusterModel.return_residence_time(model_call)
