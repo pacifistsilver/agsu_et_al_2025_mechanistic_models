@@ -504,50 +504,8 @@ class ClusterModel:
         )            
         return self.simulation_parameter_df, self.simulation_site_dwell_time_df, self.simulation_reaction_history_df
 
-class ThermodynamicsCalculator:
     """Handles the statistical thermodynamic formulas for the Sox2 cluster model."""
     
-    def return_Zn(self, n, N, K1, S, c):
-        """Calculates the statistical weight of exactly n bound molecules."""
-        binding_term = math.comb(N, n) * ((K1 * S)**n)
-        
-        # Calculate interaction sum using a generator expression
-        interaction_sum = sum(
-            math.comb(N - n, l) * math.comb(n, l) * math.factorial(l) * (c**l)
-            for l in range(min(n, N - n) + 1)
-        )
-        return binding_term * interaction_sum
-
-    def return_total_Z(self, N, K1, S, c):
-        """Calculates the total partition function by summing all Zn."""
-        return sum(self.return_Zn(n, N, K1, S, c) for n in range(N + 1))
-    
-    def return_cluster_transcription_rate(self, N, K1, S, c, alpha):
-        """Calculates macroscopic density (Equation 4)."""
-        zed = self.return_total_Z(N, K1, S, c)
-        return alpha * (1 - (zed**-1)) if zed else 0
-    
-    def return_dwelltime_transcription_rate(self, N, K1, S, c, alpha, K_alpha=None, mode="constant"):
-        """Calculates weighted transcription rate (Equation 5)."""
-        numerator_sum = 0
-        Z_total = self.return_total_Z(N, K1, S, c)
-        
-        for n in range(N + 1):
-            Zn = self.return_Zn(n, N, K1, S, c)
-            
-            if n > 0:
-                match mode:
-                    case "constant": alpha_n = alpha
-                    case "linear":   alpha_n = alpha * n
-                    case "saturating": alpha_n = (alpha * K_alpha * n) / (K_alpha * n + 1)
-                    case _: alpha_n = 0
-            else:
-                alpha_n = 0
-                
-            numerator_sum += alpha_n * Zn
-            
-        return numerator_sum / Z_total if Z_total else 0
-
 def run_single_trajectory(param_name, val, trajectory_id, base_params, base_vars, sites, max_time):
     """Runs a single simulation and returns the extracted metric."""
     current_vars = base_vars.copy()
