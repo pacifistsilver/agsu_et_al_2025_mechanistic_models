@@ -108,3 +108,5 @@ dmypy.json
 # plots and logs
 *.png
 *.txt
+*.csv
+*.html
