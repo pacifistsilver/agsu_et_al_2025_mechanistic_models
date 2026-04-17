@@ -1,4 +1,4 @@
-from nucleosome_stochastic_model import SimulationResultHandler, ClusterModel
+from main import SimulationResultHandler, ClusterModel
 import itertools
 import numpy as np
 import polars as pl

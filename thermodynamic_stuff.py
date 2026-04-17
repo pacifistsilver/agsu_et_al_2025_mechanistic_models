@@ -3,7 +3,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
-from nucleosome_stochastic_model import ThermodynamicsCalculator
+from main import ThermodynamicsCalculator
 
 calc = ThermodynamicsCalculator()
 alpha = 1.0
