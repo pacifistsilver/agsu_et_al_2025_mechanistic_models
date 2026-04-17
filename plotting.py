@@ -6,6 +6,126 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from concurrent.futures import ProcessPoolExecutor
+
+class ModelPlot:
+    """Retrieve model outputs and partition function outputs and handle plotting of said data.
+    
+    Inherits class attributes from "model" scope. i.e. takes the attributes from ModelCall
+    
+    Attributes:
+        spatial_states: Lattice structure of chromatin. 
+        n_binding_sites: The total number of binding sites.
+        sox2_simulation_variables: Starting population of free/bound/mRNA
+        bulk_states: Tracks the amount of free/bound/mrna
+        times: Time interval to record data. 
+        dwell_time_df: Dataframe containing all dwell_times in a trajectory. i.e. time spent in sites.
+        simulation_reaction_history_df: Dataframe containing reactions that occur in a trajectory.
+
+    """
+    def __init__(self, model):
+        self.spatial_states = model.spatial_states
+        self.n_binding_sites = model.n_binding_sites
+        self.sox2_simulation_variables = model.sox2_simulation_variables
+        self.bulk_states = model.bulk_states
+        self.times = model.times
+        self.dwell_time_df = model.simulation_site_dwell_time_df
+        self.simulation_reaction_history_df = model.simulation_reaction_history_df
+        
+    # Retrieve model data
+    def generate_thermodynamic_expectation_rho(self, S_vals, N_vals, K1_vals, c=1.0, alpha=1.0):
+        """Retrieve expected transcription rate from partition function given parameters.
+        
+        Args:
+            S_vals:
+                Array of bulk TF values to iterate over.
+            N_vals:
+                Array of total binding sites in chromatin.
+            K1_vals:
+                Array of binding affinities K1.
+            c:
+                Dimensionless binding weight represented as a float variable.
+            alpha:
+                Float variable representing transcription rate.
+        
+        Returns
+            Dataframe instance. 
+            For example:
+            {
+                "S": 1,
+                "N": 1,
+                "K": 1,
+                "thermo_maxmial_rate": 1.0,
+                ...
+            }
+        Raises:
+            None
+        """
+        results = []
+        for S, N, K1 in itertools.product(S_vals, N_vals, K1_vals):
+            rate_maximal = PartitionFunction.return_maximal_rho(int(N), K1, S, c, alpha)
+            rate_linear = PartitionFunction.return_nonmaximal_rho(int(N), K1, S, c, alpha, mode="linear")
+            rate_saturating = PartitionFunction.return_nonmaximal_rho(int(N), K1, S, c, alpha,K_alpha=1, mode="saturating")
+            results.append({"S": S, "N": int(N), "K1": K1, "thermo_maximal_rate": rate_maximal, "thermo_linear_rate": rate_linear, "thermo_saturating_rate": rate_saturating})
+            
+        return pd.DataFrame(results)
+
+    def get_effective_transcription_rate(self) -> float:
+        if not self.bulk_states:
+            return 0.0
+            
+        k_prod_m = self.sox2_simulation_variables[2] 
+        
+        # Extract the number of bound SOX2 molecules at each time step (index 1 of bulk_states)
+        bound_counts = [state[1] for state in self.bulk_states]
+        average_bound = sum(bound_counts) / len(bound_counts)
+        
+        return average_bound * k_prod_m
+    
+    def return_mRNA_data(self) -> float:
+        if not self.bulk_states:
+            return 0.0
+        mrna_counts = [state[2] for state in self.bulk_states]
+        return (sum(mrna_counts), len(mrna_counts))
+
+    def get_average_dwell_time(self) -> float:
+        if self.dwell_time_df.is_empty():
+            return 0.0
+        return self.dwell_time_df.select(pl.col("dwell_time").mean()).item()
+
+    # Save model outputs to file
+    def save_residence_time_log(self, filename: str = "time-log.txt"):
+        residence_time_states = (
+            self.dwell_time_df.group_by("dwell_site")
+            .agg(pl.col("dwell_time").sum())
+            .sort(by="dwell_time", descending=True)
+        )
+        np.savetxt(filename, residence_time_states, fmt="%g", header="dwell_site/dwell_time", delimiter=", ")
+        
+    def save_reaction_history_log(self, filename: str = "reaction_history.csv"):
+        # Cast and save without permanently mutating the instance's dataframe
+        df_out = self.simulation_reaction_history_df.cast({"site_target": pl.Int64, "site_paired_with": pl.Int64})
+        df_out.write_csv(filename)
+
+    # Plot model outputs    
+    def plot_nucleosome_occupancy_history(self, filename: str = "nuc_history.png"):
+        sns.set_theme(style="ticks")
+        custom_cmap = ListedColormap(["#e2e8f0", "#3b82f6"])
+        
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(self.spatial_states, cmap=custom_cmap, cbar=False, yticklabels="auto")
+        
+        plt.title("Sox2 Nucleosome Occupancy Over Time", pad=15)
+        plt.xlabel(f"Nucleosome Index (0 to {self.n_binding_sites - 1})")
+        plt.ylabel("Time (Simulation Steps)")
+        
+        legend_elements = [Patch(facecolor="#e2e8f0", label="Unbound"), Patch(facecolor="#3b82f6", label="Sox2 Bound")]
+        plt.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1.25, 1))
+        
+        plt.tight_layout()
+        plt.savefig(filename)
+        plt.close()
+
+
 def plot_all_k1_heatmaps():
     # 1. Define parameter ranges 
     S_vals = np.linspace(1.0, 100.0, 20)      # Free SOX2: 1.0 to 100.0
