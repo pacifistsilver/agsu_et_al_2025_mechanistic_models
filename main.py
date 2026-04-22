@@ -80,7 +80,8 @@ class PartitionFunction:
         Returns:
             The float sum of the partition function over all n from 0 to N.
         """
-        return sum(PartitionFunction.calculate_Zn(n, N, K1, S, c) for n in range(N + 1)) # summation over all n -> N
+        max_n = min(N, int(S))
+        return sum(PartitionFunction.calculate_Zn(n, N, K1, S, c) for n in range(max_n + 1)) # summation over all n -> N
     
     @staticmethod
     def return_maximal_rho(N: int, K1: float, S: float, c: float, alpha: float) -> float:
