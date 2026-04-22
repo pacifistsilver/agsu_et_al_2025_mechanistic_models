@@ -66,6 +66,7 @@ class PartitionFunction:
             math.comb(N - n, l) * math.comb(n, l) * math.factorial(l) * (c**l)
             for l in range(min(n, N - n) + 1)
         ) # second summation
+        print(binding_term, pairing_sum)
         return binding_term * pairing_sum
     @staticmethod
     def calculate_total_Z(N: int, K1: float, S: float, c: float) -> float:
@@ -81,7 +82,7 @@ class PartitionFunction:
             The float sum of the partition function over all n from 0 to N.
         """
         max_n = min(N, int(S))
-        return sum(PartitionFunction.calculate_Zn(n, N, K1, S, c) for n in range(max_n)) # summation over all n -> N
+        return sum(PartitionFunction.calculate_Zn(n, N, K1, S, c) for n in range(max_n + 1)) # summation over all n -> N
     
     @staticmethod
     def return_maximal_rho(N: int, K1: float, S: float, c: float, alpha: float) -> float:
@@ -102,7 +103,7 @@ class PartitionFunction:
         zed = PartitionFunction.calculate_total_Z(N, K1, S, c)
         return alpha * (1 - (zed**-1)) if zed else 0.0
     @staticmethod
-    def return_nonmaximal_rho(N: int, N_bound: int, K1: float, S: float, c: float, alpha: float, K_alpha: float = None, mode: str = "constant") -> float:
+    def return_nonmaximal_rho(N: int, K1: float, S: float, c: float, alpha: float, K_alpha: float = None, mode: str = "constant") -> float:
         """Calculate Rho in cases where binding leads to a multiplicative effect on transcription rate.
 
         Second and third method of calculating rho where transcription is proportional to the number of bound TF. 
@@ -380,7 +381,7 @@ class ModelCall:
         return self._generate_dataframes()
     
     
-testing = PartitionFunction.return_nonmaximal_rho(5, 1, 50, 1, 1, 1, 1, mode="linear")
+testing = PartitionFunction.return_nonmaximal_rho(10, 1, 1, 1, 1, 1, mode="linear")
 # when S < N, rho should be very low with the upper limit as just alpha
 # add a maximum N
 print(testing)
