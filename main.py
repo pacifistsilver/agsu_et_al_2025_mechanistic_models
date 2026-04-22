@@ -1,31 +1,32 @@
-import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
-import math
-import polars as pl
-import pandas as pd
-import os
-import itertools
-import concurrent.futures
-from matplotlib.colors import ListedColormap
-from matplotlib.patches import Patch
 """Partition function model and Gillespie model of gene expression given clustering.
 
-This module obtains residence time, mRNA expression from a realisation of a single trajectory of the chemical master equation.
-Additionally, from the trajectory parameters, we also determine the expected transcription rate (rho).
+This module obtains residence time and mRNA expression from a realisation of a 
+single trajectory of the chemical master equation. Additionally, from the trajectory 
+parameters, we also determine the expected transcription rate (rho).
 
 Typical usage:
-model_call = ModelCall.run_trajectory(params)
+    model_call = ModelCall.run_trajectory(params)
 
 If you face any issues, email: dwl25@ic.ac.uk or danielluo1143@gmail.com 
 """
 
-"""
-TODO: 
-    1. random starting scenarios according to some binomial distribution (i.e. random binding position for tf/none bound/ etc...)
-    2. reassociation following hop should follow some gaussian distribution.
-    3. add correct exceptions for all functions. 
-"""
+import math
+import os
+import itertools
+import concurrent.futures
+
+import numpy as np
+import pandas as pd
+import polars as pl
+import seaborn as sns
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
+
+# TODO: 
+#   1. random starting scenarios according to some binomial distribution (i.e. random binding position for tf/none bound/ etc...)
+#   2. reassociation following hop should follow some gaussian distribution.
+#   3. add correct exceptions for all functions. 
 
 class PartitionFunction: 
     """Calculate Rho (expected transcription rate) from the partition function.
@@ -41,92 +42,90 @@ class PartitionFunction:
         (1) alpha * (1 - (zed**-1))
         (2) alpha * n
         (3) (alpha * K_alpha * n) / (K_alpha * n + 1)
-    where alpha is the rate of transcription, n is the number of bound sites, K_alpha is the
-    constant which sets the rate at which alpha saturates for large n (where K_alpha^-1 << n),
+    where alpha is the rate of transcription, n is the number of bound sites, 
+    K_alpha is the constant which sets the rate at which alpha saturates for large n (where K_alpha^-1 << n),
     and zed the sum of the partition function.
-    
-    Attributes:
-        None 
     """   
-    def calculate_Zn(self, n: int, N: int, K1: float, S: float, c: float) -> float:
+    
+    def calculate_Zn(n: int, N: int, K1: float, S: float, c: float) -> float:
         """Calculate partition function for a single n.
         
         Args:
             n: Number of bound sites.
-            N: Total sites
+            N: Total sites.
             K1: Intrinsic affinity for sites.
             S: Bulk TF.
             c: Dimensionless binding factor.
         
         Returns:
-            A float sum of the first and second 
-            summation of the partition function
-            
-        Raises:
-            None
+            A float sum of the first and second summation of the partition function.
         """
         binding_term = math.comb(N, n) * ((K1 * S)**n) # first summation
         
-        interaction_sum = sum(
+        pairing_sum = sum(
             math.comb(N - n, l) * math.comb(n, l) * math.factorial(l) * (c**l)
             for l in range(min(n, N - n) + 1)
         ) # second summation
-        return binding_term * interaction_sum
-    
-    def calculate_total_Z(self, N: int, K1: float, S: float, c: float) -> float:
-        return sum(self.calculate_Zn(n, N, K1, S, c) for n in range(N + 1)) # summation over all n -> N
-    
-    def return_maximal_rho(self, N: int, K1: float, S: float, c: float, alpha: float) -> float:
-        """Calculate Rho in case of any binding achieve maximal rate.
-
-        First method of calculating rho which is the case where transcription rate alpha
-        is achieved by any binding of a TF to DNA.
+        return binding_term * pairing_sum
+    @staticmethod
+    def calculate_total_Z(N: int, K1: float, S: float, c: float) -> float:
+        """Calculate the partition function over all possible bound sites (i.e. n = 0 to N)
         
         Args:
-            n: Number of bound sites.
-            N: Total sites
+            N: Total sites.
             K1: Intrinsic affinity for sites.
             S: Bulk TF.
             c: Dimensionless binding factor.
-            alpha: Rate of transcription
+            
+        Returns:
+            The float sum of the partition function over all n from 0 to N.
+        """
+        return sum(PartitionFunction.calculate_Zn(n, N, K1, S, c) for n in range(n, N + 1)) # summation over all n -> N
+    
+    @staticmethod
+    def return_maximal_rho(N: int, K1: float, S: float, c: float, alpha: float) -> float:
+        """Calculate Rho in the case where any binding achieves maximal rate.
+
+        First method of calculating the transcription rate rho which is the case where the maximal transcription rate is achieved by the binding of a TF to DNA.
+        
+        Args:
+            N: Total sites.
+            K1: Intrinsic affinity for sites.
+            S: Bulk TF.
+            c: Dimensionless binding factor.
+            alpha: Rate of transcription.
                     
         Returns:
             Float sum of the transcription rate rho.
-        
-        Raises:
-            None
         """
-        zed = self.calculate_total_Z(N, K1, S, c)
+        zed = PartitionFunction.calculate_total_Z(N, K1, S, c)
         return alpha * (1 - (zed**-1)) if zed else 0.0
-    
-    def return_nonmaximal_rho(self, N: int, K1: float, S: float, c: float, alpha: float, K_alpha: float = None, mode: str = "constant") -> float:
-        """Calculate Rho in case where binding leads to a multiplicative effect on transcription rate.
+    @staticmethod
+    def return_nonmaximal_rho(N: int, N_bound: int, K1: float, S: float, c: float, alpha: float, K_alpha: float = None, mode: str = "constant") -> float:
+        """Calculate Rho in cases where binding leads to a multiplicative effect on transcription rate.
 
-        Second and third method of calculating rho where transcription 
-        is proportional to occupancy time on a per Sox2 basis
+        Second and third method of calculating rho where transcription is proportional to the number of bound TF. 
+        Switch between the second and third methods by specifying mode as either "linear" or "saturating". 
+        See the method return_maximal_rho for the other method of calculating transcription rate. 
         
         Args:
-            n: Number of bound sites.
-            N: Total sites
+            N: Total sites.
+            N_bound: sites that are bound by a TF.
             K1: Intrinsic affinity for sites.
             S: Bulk TF.
             c: Dimensionless binding factor.
-            alpha: Rate of transcription
-            K_alpha: Constant which determines rate at which saturation occurs.
-            mode: Chooes
+            alpha: Rate of transcription.
+            K_alpha: Constant which determines the rate at which saturation occurs.
+            mode: Chooses the mode of calculation ("constant", "linear", or "saturating").
                     
         Returns:
             Float sum of the transcription rate rho.
-        
-        Raises:
-            None
         """
-        
         numerator_sum = 0.0 # sum of individual zed 
-        Z_total = self.calculate_total_Z(N, K1, S, c)
+        Z_total = PartitionFunction.calculate_total_Z(N, K1, S, c)
         
-        for n in range(1, N + 1):
-            Zn = self.calculate_Zn(n, N, K1, S, c)
+        for n in range(1, N):
+            Zn = PartitionFunction.calculate_Zn(n, N, K1, S, c)
             
             if mode == "constant":
                 alpha_n = alpha
@@ -138,42 +137,30 @@ class PartitionFunction:
                 alpha_n = 0.0
                 
             numerator_sum += alpha_n * Zn
-            
+        print(numerator_sum, Z_total)
         return numerator_sum / Z_total if Z_total else 0.0    
 
 class ModelCall:
     """Stochastic simulation of a single trajectory. 
     
     Attributes:
-        model_params:
-            Trajectory parameters.
-        model_var:
-            Initial variable states (free TF, bound TF, mRNA)
-        model_binding_sites:
-            Number of binding sites in chromatin lattice.
-        sim_max_time:
-            Max time to run simulation for.
-        record_interval:
-            Simulation time interval to record reactions for.
-        track_history: 
-            If True save reaction history.
+        sox2_model_parameters (dict): Trajectory parameters.
+        sox2_model_variables (dict): Initial variable states (free TF, bound TF, mRNA).
+        n_binding_sites (int): Number of binding sites in chromatin lattice.
+        t_max (int): Max time to run simulation for.
+        record_interval (float): Simulation time interval to record reactions for.
+        track_history (bool): If True, save reaction history.
     """
     def __init__(self, model_param: dict, model_var: dict, model_binding_sites: int, sim_max_time: int, record_interval: float = 1.0, track_history: bool = True):
-        """Initialise class instance.
+        """Initialize class instance.
         
         Args:
-            model_params:
-                Trajectory parameters.
-            model_var:
-                Initial variable states (free TF, bound TF, mRNA)
-            model_binding_sites:
-                Number of binding sites in chromatin lattice.
-            sim_max_time:
-                Max time to run simulation for.
-            record_interval:
-                Simulation time interval to record reactions for.
-            track_history: 
-                If True save reaction history.
+            model_param: Trajectory parameters.
+            model_var: Initial variable states (free TF, bound TF, mRNA).
+            model_binding_sites: Number of binding sites in chromatin lattice.
+            sim_max_time: Max time to run simulation for.
+            record_interval: Simulation time interval to record reactions for.
+            track_history: If True, save reaction history.
         """
         self.t_max: int = sim_max_time
         self.record_interval = record_interval
@@ -183,14 +170,9 @@ class ModelCall:
         self.track_history = track_history
 
     def _initialize_state(self):
-        """Initialise simulation variables, parameters, chromatin states.
+        """Initialize simulation variables, parameters, and chromatin states.
         
-        Initialises the stoichiometry, hopping kernel, reaction constants, etc...
-        
-        Args:
-            None
-        Raises:
-            None 
+        Initializes the stoichiometry, hopping kernel, reaction constants, etc.
         """
         self.sox2_simulation_parameters = [self.sox2_model_parameters[key] for key in self.sox2_model_parameters]
         self.sox2_simulation_variables = [self.sox2_model_variables[key] for key in self.sox2_model_variables]
@@ -225,15 +207,11 @@ class ModelCall:
         self.site_bind_times = np.full(self.n_binding_sites, -1.0)
 
     def _calculate_propensities(self):
-        """Update propensities and return new propensities.
+        """Update and return new propensities.
         
-        Args:
-            None
         Returns:
-            Propensities array containing all chemical reactions and
-            sum of propensities of all chemical reactions.
-        Raises:
-            None
+            A tuple containing the propensities array for all chemical reactions 
+            and the float sum of propensities of all chemical reactions.
         """
         k_prod_s, k_deg_s, k_prod_m, k_deg_m, k_bind, k_unbind, k_hop, _ = self.sox2_simulation_variables
         sox2_free, sox2_bound, mrna_count = self.parameter_states
@@ -253,16 +231,13 @@ class ModelCall:
         return propensities, np.sum(propensities)
 
     def _execute_spatial_reaction(self, reaction_index):
-        """Track updates to chromatin lattice array in case of binding/sliding.
+        """Track updates to the chromatin lattice array in case of binding/sliding.
         
-        Handles three cases for the lattice: (1) bind (2) unbind (3) pair.
-        Updates chromatin_lattice index position based on reaction choice.
+        Handles three cases for the lattice: (1) bind, (2) unbind, (3) pair.
+        Updates the chromatin_lattice index position based on reaction choice.
         
         Args:
-            reaction_index:
-                Index reference to propensity array. i.e. which reaction was selected.
-        Raises:
-            None
+            reaction_index: Index reference to the propensity array (which reaction was selected).
         """
         site_target, site_paired_with = -1, -1
 
@@ -328,30 +303,27 @@ class ModelCall:
         if self.track_history:
             self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))
 
-    def _record_snapshot(self, t_next_reaction):
-        while self.next_record_time <= self.t + t_next_reaction and self.next_record_time <= self.t_max:
-            self.times.append(self.next_record_time)
-            self.bulk_states.append(self.parameter_states.copy())
-            self.spatial_states.append(self.chromatin_lattice.copy())
-            self.next_record_time += self.record_interval
+    def _record_snapshot(self):
+        """Record the current states of the simulation.
+        
+        
+        """
+        self.times.append(self.t)
+        self.bulk_states.append(self.parameter_states.copy())
+        self.spatial_states.append(self.chromatin_lattice.copy())
 
     def _generate_dataframes(self):
         """Setup model output dataframes.
         
-        Args:
-            None
         Returns:
-            sim_variable_states_df: 
-                Polars df showing time evolution of system variables
-                with columns "time", "sox2_free", "sox2_bound", "mRNA".
-            sim_site_dwell_times_df:
-                Polars df storing residence times at any bound state during course of sim.
-                With columns "dwell_site" and "dwell_time. 
-            sim_reaction_history_df:
-                Polars df containing all reactions that occur within bound of simulation.
-                Columns "time", "reaction_type", "site_target", "site_paired_with"
-        Raises:
-            None
+            A tuple of three Polars DataFrames:
+            - sim_variable_states_df: Polars df showing time evolution of system variables
+              with columns "time", "sox2_free", "sox2_bound", "mRNA".
+            - sim_site_dwell_times_df: Polars df storing residence times at any bound state 
+              during course of sim. With columns "dwell_site" and "dwell_time".
+            - sim_reaction_history_df: Polars df containing all reactions that occur 
+              within bound of simulation. Columns "time", "reaction_type", "site_target", 
+              "site_paired_with".
         """
         for i in range(self.n_binding_sites):
             if not self.is_free[i] and self.site_bind_times[i] != -1.0:
@@ -376,18 +348,12 @@ class ModelCall:
         return self.sim_variable_states_df, self.sim_site_dwell_times_df, self.sim_reaction_history_df
 
     def run_trajectory(self):
-        """Runs the Gillespie simulation.
+        """Run the Gillespie simulation.
         
-        Contains all the Gillespie logic.
+        Contains all the core Gillespie logic for propagating the model through time.
         
-        Args:
-            None
         Returns:
-            self._generate_dataframes():
-                Method call to generate outputs dataframes. 
-                See _generate_dataframes docstring for more information.
-        Raises:
-            None
+            The tuple of Polars DataFrames generated by the _generate_dataframes method.
         """
         self._initialize_state()
 
@@ -399,7 +365,7 @@ class ModelCall:
             r1, r2 = np.random.random(2)
             t_next_reaction = (1.0 / total_prop) * np.log(1.0 / r1)
             
-            self._record_snapshot(t_next_reaction)
+            self._record_snapshot()
             self.t += t_next_reaction
 
             cumulative_props = np.cumsum(propensities)
@@ -409,3 +375,4 @@ class ModelCall:
             self._execute_spatial_reaction(reaction_index)
 
         return self._generate_dataframes()
+    
