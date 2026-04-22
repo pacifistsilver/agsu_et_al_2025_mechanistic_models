@@ -80,7 +80,7 @@ class PartitionFunction:
         Returns:
             The float sum of the partition function over all n from 0 to N.
         """
-        return sum(PartitionFunction.calculate_Zn(n, N, K1, S, c) for n in range(n, N + 1)) # summation over all n -> N
+        return sum(PartitionFunction.calculate_Zn(n, N, K1, S, c) for n in range(N + 1)) # summation over all n -> N
     
     @staticmethod
     def return_maximal_rho(N: int, K1: float, S: float, c: float, alpha: float) -> float:
@@ -101,7 +101,7 @@ class PartitionFunction:
         zed = PartitionFunction.calculate_total_Z(N, K1, S, c)
         return alpha * (1 - (zed**-1)) if zed else 0.0
     @staticmethod
-    def return_nonmaximal_rho(N: int, N_bound: int, K1: float, S: float, c: float, alpha: float, K_alpha: float = None, mode: str = "constant") -> float:
+    def return_nonmaximal_rho(N: int, K1: float, S: float, c: float, alpha: float, K_alpha: float = None, mode: str = "constant") -> float:
         """Calculate Rho in cases where binding leads to a multiplicative effect on transcription rate.
 
         Second and third method of calculating rho where transcription is proportional to the number of bound TF. 
@@ -124,7 +124,7 @@ class PartitionFunction:
         numerator_sum = 0.0 # sum of individual zed 
         Z_total = PartitionFunction.calculate_total_Z(N, K1, S, c)
         
-        for n in range(1, N):
+        for n in range(1, N + 1):
             Zn = PartitionFunction.calculate_Zn(n, N, K1, S, c)
             
             if mode == "constant":
@@ -137,7 +137,6 @@ class PartitionFunction:
                 alpha_n = 0.0
                 
             numerator_sum += alpha_n * Zn
-        print(numerator_sum, Z_total)
         return numerator_sum / Z_total if Z_total else 0.0    
 
 class ModelCall:
