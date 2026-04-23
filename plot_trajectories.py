@@ -26,14 +26,14 @@ class ModelPlot:
 
     """
     def __init__(self, model):
-        self.spatial_states = model.spatial_states
+        self.spatial_states = model.spatial_states 
         self.n_binding_sites = model.n_binding_sites
         self.sox2_simulation_variables = model.sox2_simulation_variables
         self.bulk_states = model.bulk_states
         self.times = model.times
-        self.dwell_time_df = model.simulation_site_dwell_time_df
-        self.simulation_reaction_history_df = model.simulation_reaction_history_df
-        
+        self.dwell_time_df = model.sim_site_dwell_times_df
+        self.simulation_reaction_history_df = model.sim_reaction_history_df
+
     # Retrieve model data
     @staticmethod
     def generate_thermodynamic_expectation_rho(S_vals, N_vals, K1_vals, c=1.0, alpha=1.0):
@@ -110,6 +110,7 @@ class ModelPlot:
         df_out = self.simulation_reaction_history_df.cast({"site_target": pl.Int64, "site_paired_with": pl.Int64})
         df_out.write_csv(filename)
     
+    # plot trajectories
     def plot_nucleosome_occupancy_history(self, filename: str = "nuc_history.png"):
         sns.set_theme(style="ticks")
         custom_cmap = ListedColormap(["#e2e8f0", "#3b82f6"])
@@ -127,6 +128,73 @@ class ModelPlot:
         plt.tight_layout()
         plt.savefig(filename)
         plt.close()
+    
+    def plot_trajectory_and_noise(self, burn_in_fraction: float = 0.2) -> dict:
+        """Plots key variables over time from the initialised trajectory, and calculates the Fano factor and CV of the transcription rate.
+        
+        
+        """
+        if not self.bulk_states:
+            print("No trajectory data found. Ensure the model has been run before plotting.")
+            return {"fano": 0.0, "cv": 0.0, "mean_rate": 0.0}
+
+        times_array = np.array(self.times)
+        sox2_free = np.array([state[0] for state in self.bulk_states])
+        sox2_bound = np.array([state[1] for state in self.bulk_states])
+        mrna = np.array([state[2] for state in self.bulk_states])
+        
+        k_prod_m = self.sox2_simulation_variables[2]
+        production_rate = sox2_bound * k_prod_m
+        
+        burn_in_idx = int(len(times_array) * burn_in_fraction)
+        steady_state_rate = production_rate[burn_in_idx:]
+        
+        if len(steady_state_rate) == 0:
+            return {"fano": 0.0, "cv": 0.0, "mean_rate": 0.0}
+            
+        mean_rate = np.mean(steady_state_rate)
+        var_rate = np.var(steady_state_rate)
+        
+        fano = var_rate / mean_rate if mean_rate > 0 else 0.0
+        cv = np.sqrt(var_rate) / mean_rate if mean_rate > 0 else 0.0
+        
+        # 4. Plotting
+        fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
+        fig.suptitle(
+            f'Trajectory Dynamics\nProduction Rate Noise - Fano: {fano:.3f} | CV: {cv:.3f}', 
+            fontsize=14, y=0.95
+        )
+        
+        # mRNA
+        axes[0].step(times_array, mrna, where='post', color='#9b59b6', linewidth=1.5)
+        axes[0].set_ylabel('mRNA Count')
+        axes[0].grid(True, alpha=0.3)
+        
+        # Free SOX2
+        axes[1].step(times_array, sox2_free, where='post', color='#3498db', linewidth=1.5)
+        axes[1].set_ylabel('Free SOX2')
+        axes[1].grid(True, alpha=0.3)
+        
+        # Bound SOX2
+        axes[2].step(times_array, sox2_bound, where='post', color='#e67e22', linewidth=1.5)
+        axes[2].set_ylabel('Bound SOX2')
+        axes[2].grid(True, alpha=0.3)
+        
+        # mRNA Production Rate
+        axes[3].step(times_array, production_rate, where='post', color='#e74c3c', linewidth=1.5)
+        axes[3].set_ylabel('Prod. Rate\n(mRNA / time)')
+        axes[3].set_xlabel('Time (Simulation Steps)')
+        axes[3].grid(True, alpha=0.3)
+        
+        # Cleanup spines
+        for ax in axes:
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            
+        plt.tight_layout()
+        plt.show()
+        
+        return {"fano": fano, "cv": cv, "mean_rate": mean_rate}
     
 def run_1d_simulation_slice(args):
     """Runs a single stochastic simulation to extract mean AND standard deviation."""
@@ -226,6 +294,5 @@ def plot_1d_cross_section_grid_tufte():
     plt.subplots_adjust(top=0.90, wspace=0.15, hspace=0.3) 
     plt.show()
     
-
 if __name__ == "__main__":
     plot_1d_cross_section_grid_tufte()

@@ -22,7 +22,6 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
-
 # TODO: 
 #   1. random starting scenarios according to some binomial distribution (i.e. random binding position for tf/none bound/ etc...)
 #   2. reassociation following hop should follow some gaussian distribution.
@@ -154,7 +153,7 @@ class ModelCall:
         track_history (bool): If True, save reaction history.
     """
     def __init__(self, model_param: dict, model_var: dict, model_binding_sites: int, sim_max_time: int, record_interval: float = 1.0, track_history: bool = True):
-        """Initialize class instance.
+        """Initialise class instance.
         
         Args:
             model_param: Trajectory parameters.
@@ -170,11 +169,12 @@ class ModelCall:
         self.sox2_model_variables: dict = model_var
         self.n_binding_sites: int = model_binding_sites
         self.track_history = track_history
+        self.chromatin_lattice = np.zeros(self.n_binding_sites, dtype=np.int8)
 
     def _initialize_state(self):
-        """Initialize simulation variables, parameters, and chromatin states.
+        """Initialise simulation variables, parameters, and chromatin states.
         
-        Initializes the stoichiometry, hopping kernel, reaction constants, etc.
+        Initialises the stoichiometry, hopping kernel, reaction constants, etc.
         """
         self.sox2_simulation_parameters = [self.sox2_model_parameters[key] for key in self.sox2_model_parameters]
         self.sox2_simulation_variables = [self.sox2_model_variables[key] for key in self.sox2_model_variables]
@@ -184,12 +184,15 @@ class ModelCall:
         
         self.is_free = np.ones(self.n_binding_sites, dtype=bool)
         self.is_unpaired_bound = np.zeros(self.n_binding_sites, dtype=bool)
-        self.chromatin_lattice = np.zeros(self.n_binding_sites, dtype=np.int8)
         self.parameter_states = np.array(self.sox2_simulation_parameters, dtype=np.int32)
         self.bridged_to = np.full(self.n_binding_sites, -1, dtype=np.int32)
+        self.promoter_site = int((len(self.chromatin_lattice) - 1)/2)
+        print(self.promoter_site)
         
         # Kernel & Hopping Weights
-        self.kernel_matrix = np.ones((self.n_binding_sites, self.n_binding_sites), dtype=float)
+        indices = np.arange(self.n_binding_sites)
+        dist_matrix = np.abs(indices[:, None] - indices[None, :]) 
+        self.kernel_matrix = np.exp(-dist_matrix / 1)
         np.fill_diagonal(self.kernel_matrix, 0.0)
         self.hop_weights = np.sum(self.kernel_matrix, axis=1)
 
@@ -226,7 +229,7 @@ class ModelCall:
             k_bind * sox2_free * unbound_sites,  
             k_deg_s * sox2_free,  
             k_unbind * sox2_bound,  
-            k_prod_m * sox2_bound,  
+            k_prod_m if self.chromatin_lattice[self.promoter_site] == 1 else 0,  
             k_deg_m * mrna_count,  
             k_hop * total_hop_weight,  
         ])
@@ -378,3 +381,5 @@ class ModelCall:
 
         return self._generate_dataframes()
     
+    
+
