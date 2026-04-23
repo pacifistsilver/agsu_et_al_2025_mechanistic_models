@@ -161,7 +161,6 @@ class ModelCall:
 
     def _initialise_state(self):
         """Initialise simulation variables, parameters, and chromatin states."""
-        # Initial bulk states: [sox2_free, nanog_free, sox2_bound, nanog_bound, mrna]
         self.parameter_states = np.array([
             self.sox2_model_parameters.get('sox2_free', 0),
             self.sox2_model_parameters.get('nanog_free', 0),
@@ -178,15 +177,15 @@ class ModelCall:
         self.bridged_to = np.full(self.n_binding_sites, -1, dtype=np.int32)
         self.promoter_site = int((len(self.chromatin_lattice) - 1)/2)
         
-        # Kernel & Hopping Weights
+        # Kernel Matrix for pairing distances
         indices = np.arange(self.n_binding_sites)
         dist_matrix = np.abs(indices[:, None] - indices[None, :]) 
         self.kernel_matrix = np.exp(-dist_matrix / 1)
         np.fill_diagonal(self.kernel_matrix, 0.0)
-        self.hop_weights = np.sum(self.kernel_matrix, axis=1)
+        self.current_pair_weights = np.zeros_like(self.kernel_matrix)
 
         self.stoichiometry_matrix = np.array([
-            # prod_s, prod_n, bind_s, bind_n, deg_s, deg_n, unbind_s, unbind_n, prod_m, deg_m, hop
+            # prod_s, prod_n, bind_s, bind_n, deg_s, deg_n, unbind_s, unbind_n, prod_m, deg_m, dimerise
             [ 1,      0,     -1,      0,     -1,     0,      1,        0,        0,      0,     0], # sox2_free
             [ 0,      1,      0,     -1,      0,    -1,      0,        1,        0,      0,     0], # nanog_free
             [ 0,      0,      1,      0,      0,     0,     -1,        0,        0,      0,     0], # sox2_bound
@@ -221,7 +220,20 @@ class ModelCall:
         sox2_free, nanog_free, sox2_bound, nanog_bound, mrna_count = self.parameter_states
         
         unbound_sites = np.sum(self.is_free)
-        total_hop_weight = np.sum(self.hop_weights[self.is_unpaired_bound])
+        
+        u_s_mask = (self.chromatin_lattice == 1) & self.is_unpaired_bound
+        u_n_mask = (self.chromatin_lattice == 2) & self.is_unpaired_bound
+        
+        # check for valid pairs
+        u_s_mask_2d = u_s_mask[:, None] # sox2 matrix
+        u_n_mask_2d = u_n_mask[:, None] # nanog matrix
+        valid_pair_matrix = (u_s_mask_2d & u_n_mask) | (u_n_mask_2d & u_s_mask) | (u_n_mask_2d & u_n_mask) # all valid nanog-nanog, sox2-nanog pairs
+        
+        # take upper triangle to prevent double-counting symmetric pairs like (i,j) and (j,i)
+        valid_pair_matrix = np.triu(valid_pair_matrix, k=1)
+        
+        self.current_pair_weights = self.kernel_matrix * valid_pair_matrix
+        total_pair_weight = np.sum(self.current_pair_weights)
 
         propensities = np.array([
             k_prod_s,                              # 0: prod_s
@@ -232,9 +244,9 @@ class ModelCall:
             k_deg_n * nanog_free,                  # 5: deg_n
             k_unbind_s * sox2_bound,               # 6: unbind_s
             k_unbind_n * nanog_bound,              # 7: unbind_n
-            k_prod_m if self.chromatin_lattice[self.promoter_site] == 1 else 0, # 8: prod_m (Any TF bound at promoter)
+            k_prod_m if self.chromatin_lattice[self.promoter_site] == 1 else 0, # 8: prod_m
             k_deg_m * mrna_count,                  # 9: deg_m
-            k_hop * total_hop_weight,              # 10: pair/hop
+            k_hop * total_pair_weight,             # 10: dimerise
         ])
         return propensities, np.sum(propensities)
 
@@ -251,7 +263,6 @@ class ModelCall:
             self.is_free[site_target] = False
             self.is_unpaired_bound[site_target] = True
             self.chromatin_lattice[site_target] = tf_type
-            self.hop_weights -= self.kernel_matrix[:, site_target]
             
             self.site_bind_times[site_target] = self.t
             site_paired_with = 0 
@@ -268,51 +279,33 @@ class ModelCall:
                 
                 self.is_free[chosen_site] = True
                 self.chromatin_lattice[chosen_site] = 0
-                self.hop_weights += self.kernel_matrix[:, chosen_site]
                 
                 if self.bridged_to[chosen_site] != -1:
                     paired_site = self.bridged_to[chosen_site]
                     self.bridged_to[chosen_site] = -1
                     self.bridged_to[paired_site] = -1
                     self.is_unpaired_bound[paired_site] = True 
-                    
-                    # Revert bulk unbind for the specific TF that was bridging
-                    if tf_type == 1:
-                        self.parameter_states[0] -= 1  
-                        self.parameter_states[2] += 1  
-                    else:
-                        self.parameter_states[1] -= 1  
-                        self.parameter_states[3] += 1  
                 else:
                     self.is_unpaired_bound[chosen_site] = False
                     
                 site_target = chosen_site
                 site_paired_with = 0 
 
-        elif reaction_index == 10:  # pair reaction
-            unpaired_indices = np.where(self.is_unpaired_bound)[0]
-            if len(unpaired_indices) > 0:
-                unpaired_weights = self.hop_weights[unpaired_indices]
+        elif reaction_index == 10:  # dimerise two bound tfs
+            total_w = np.sum(self.current_pair_weights)
+            if total_w > 0:
+                # randomly choose pair
+                flat_weights = self.current_pair_weights.flatten()
+                chosen_idx = np.random.choice(len(flat_weights), p=(flat_weights / total_w))
                 
-                dwell_site = np.random.choice(unpaired_indices, p=(unpaired_weights / np.sum(unpaired_weights)))
-                dest_weights = self.kernel_matrix[dwell_site, :] * self.is_free
+                dwell_site, next_site = divmod(chosen_idx, self.n_binding_sites)
+                site_target, site_paired_with = dwell_site, next_site
                 
-                if np.sum(dest_weights) > 0:
-                    next_site = np.random.choice(self.n_binding_sites, p=(dest_weights / np.sum(dest_weights)))
-
-                    site_target, site_paired_with = dwell_site, next_site
-                    self.is_free[next_site] = False
-                    
-                    # Carry over the correct TF type to the bridged site
-                    tf_type = self.chromatin_lattice[dwell_site]
-                    self.chromatin_lattice[next_site] = tf_type
-                    
-                    self.hop_weights -= self.kernel_matrix[:, next_site]
-                    self.is_unpaired_bound[dwell_site] = False 
-                    
-                    self.site_bind_times[next_site] = self.t
-                    self.bridged_to[dwell_site] = next_site
-                    self.bridged_to[next_site] = dwell_site
+                self.is_unpaired_bound[dwell_site] = False 
+                self.is_unpaired_bound[next_site] = False 
+                
+                self.bridged_to[dwell_site] = next_site
+                self.bridged_to[next_site] = dwell_site
 
         if self.track_history and site_target != -1:
             self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))
