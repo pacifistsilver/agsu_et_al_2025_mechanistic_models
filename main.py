@@ -22,10 +22,6 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
-# TODO: 
-#   1. random starting scenarios according to some binomial distribution (i.e. random binding position for tf/none bound/ etc...)
-#   2. reassociation following hop should follow some gaussian distribution.
-#   3. add correct exceptions for all functions. 
 
 class PartitionFunction: 
     """Calculate Rho (expected transcription rate) from the partition function.
@@ -66,6 +62,7 @@ class PartitionFunction:
             for l in range(min(n, N - n) + 1)
         ) # second summation
         return binding_term * pairing_sum
+
     @staticmethod
     def calculate_total_Z(N: int, K1: float, S: float, c: float) -> float:
         """Calculate the partition function over all possible bound sites (i.e. n = 0 to N)
@@ -100,6 +97,7 @@ class PartitionFunction:
         """
         zed = PartitionFunction.calculate_total_Z(N, K1, S, c)
         return alpha * (1 - (zed**-1)) if zed else 0.0
+
     @staticmethod
     def return_nonmaximal_rho(N: int, K1: float, S: float, c: float, alpha: float, K_alpha: float = None, mode: str = "constant") -> float:
         """Calculate Rho in cases where binding leads to a multiplicative effect on transcription rate.
@@ -145,24 +143,14 @@ class ModelCall:
     """Stochastic simulation of a single trajectory. 
     
     Attributes:
-        sox2_model_parameters (dict): Trajectory parameters.
-        sox2_model_variables (dict): Initial variable states (free TF, bound TF, mRNA).
+        sox2_model_parameters (dict): Trajectory parameters (e.g., initial states for sox2_free, nanog_free, sox2_bound, nanog_bound, mrna_count).
+        sox2_model_variables (dict): Reaction kinetic parameters (k_prod_s, k_prod_n, k_deg_s, k_deg_n, k_bind_s, k_bind_n, etc.).
         n_binding_sites (int): Number of binding sites in chromatin lattice.
         t_max (int): Max time to run simulation for.
         record_interval (float): Simulation time interval to record reactions for.
         track_history (bool): If True, save reaction history.
     """
     def __init__(self, model_param: dict, model_var: dict, model_binding_sites: int, sim_max_time: int, record_interval: float = 1.0, track_history: bool = True):
-        """Initialise class instance.
-        
-        Args:
-            model_param: Trajectory parameters.
-            model_var: Initial variable states (free TF, bound TF, mRNA).
-            model_binding_sites: Number of binding sites in chromatin lattice.
-            sim_max_time: Max time to run simulation for.
-            record_interval: Simulation time interval to record reactions for.
-            track_history: If True, save reaction history.
-        """
         self.t_max: int = sim_max_time
         self.record_interval = record_interval
         self.sox2_model_parameters: dict = model_param
@@ -171,23 +159,24 @@ class ModelCall:
         self.track_history = track_history
         self.chromatin_lattice = np.zeros(self.n_binding_sites, dtype=np.int8)
 
-    def _initialize_state(self):
-        """Initialise simulation variables, parameters, and chromatin states.
-        
-        Initialises the stoichiometry, hopping kernel, reaction constants, etc.
-        """
-        self.sox2_simulation_parameters = [self.sox2_model_parameters[key] for key in self.sox2_model_parameters]
-        self.sox2_simulation_variables = [self.sox2_model_variables[key] for key in self.sox2_model_variables]
+    def _initialise_state(self):
+        """Initialise simulation variables, parameters, and chromatin states."""
+        # Initial bulk states: [sox2_free, nanog_free, sox2_bound, nanog_bound, mrna]
+        self.parameter_states = np.array([
+            self.sox2_model_parameters.get('sox2_free', 0),
+            self.sox2_model_parameters.get('nanog_free', 0),
+            self.sox2_model_parameters.get('sox2_bound', 0),
+            self.sox2_model_parameters.get('nanog_bound', 0),
+            self.sox2_model_parameters.get('mrna_count', 0)
+        ], dtype=np.int32)
 
         self.t = 0.0
         self.next_record_time = 0.0
         
         self.is_free = np.ones(self.n_binding_sites, dtype=bool)
         self.is_unpaired_bound = np.zeros(self.n_binding_sites, dtype=bool)
-        self.parameter_states = np.array(self.sox2_simulation_parameters, dtype=np.int32)
         self.bridged_to = np.full(self.n_binding_sites, -1, dtype=np.int32)
         self.promoter_site = int((len(self.chromatin_lattice) - 1)/2)
-        print(self.promoter_site)
         
         # Kernel & Hopping Weights
         indices = np.arange(self.n_binding_sites)
@@ -196,70 +185,81 @@ class ModelCall:
         np.fill_diagonal(self.kernel_matrix, 0.0)
         self.hop_weights = np.sum(self.kernel_matrix, axis=1)
 
-        # Reaction Constants
         self.stoichiometry_matrix = np.array([
-            [1, -1, -1, 1, 0, 0, 0, 0],
-            [0, 1, 0, -1, 0, 0, 0, 0],
-            [0, 0, 0, 0, 1, -1, 0, 0],
+            # prod_s, prod_n, bind_s, bind_n, deg_s, deg_n, unbind_s, unbind_n, prod_m, deg_m, hop
+            [ 1,      0,     -1,      0,     -1,     0,      1,        0,        0,      0,     0], # sox2_free
+            [ 0,      1,      0,     -1,      0,    -1,      0,        1,        0,      0,     0], # nanog_free
+            [ 0,      0,      1,      0,      0,     0,     -1,        0,        0,      0,     0], # sox2_bound
+            [ 0,      0,      0,      1,      0,     0,      0,       -1,        0,      0,     0], # nanog_bound
+            [ 0,      0,      0,      0,      0,     0,      0,        0,        1,     -1,     0], # mrna
         ], dtype=np.int32)
 
         self.reaction_names = {
-            0: "prod_s", 1: "bind", 2: "deg_s", 3: "unbind",
-            4: "prod_m", 5: "deg_m", 6: "pair"
+            0: "prod_s", 1: "prod_n", 2: "bind_s", 3: "bind_n", 
+            4: "deg_s", 5: "deg_n", 6: "unbind_s", 7: "unbind_n",
+            8: "prod_m", 9: "deg_m", 10: "pair"
         }
 
         self.times, self.bulk_states, self.spatial_states, self.reaction_history, self.residence_time_states = [], [], [], [], []
         self.site_bind_times = np.full(self.n_binding_sites, -1.0)
 
     def _calculate_propensities(self):
-        """Update and return new propensities.
+        """Update and return new propensities."""
+        v = self.sox2_model_variables
+        k_prod_s = v.get('k_prod_s', 0.0)
+        k_prod_n = v.get('k_prod_n', 0.0)
+        k_deg_s = v.get('k_deg_s', 0.0)
+        k_deg_n = v.get('k_deg_n', 0.0)
+        k_bind_s = v.get('k_bind_s', v.get('k_bind', 0.0))
+        k_bind_n = v.get('k_bind_n', v.get('k_bind', 0.0))
+        k_unbind_s = v.get('k_unbind_s', v.get('k_unbind', 0.0))
+        k_unbind_n = v.get('k_unbind_n', v.get('k_unbind', 0.0))
+        k_prod_m = v.get('k_prod_m', 0.0)
+        k_deg_m = v.get('k_deg_m', 0.0)
+        k_hop = v.get('k_hop', 0.0)
         
-        Returns:
-            A tuple containing the propensities array for all chemical reactions 
-            and the float sum of propensities of all chemical reactions.
-        """
-        k_prod_s, k_deg_s, k_prod_m, k_deg_m, k_bind, k_unbind, k_hop, _ = self.sox2_simulation_variables
-        sox2_free, sox2_bound, mrna_count = self.parameter_states
+        sox2_free, nanog_free, sox2_bound, nanog_bound, mrna_count = self.parameter_states
         
         unbound_sites = np.sum(self.is_free)
         total_hop_weight = np.sum(self.hop_weights[self.is_unpaired_bound])
 
         propensities = np.array([
-            k_prod_s,  
-            k_bind * sox2_free * unbound_sites,  
-            k_deg_s * sox2_free,  
-            k_unbind * sox2_bound,  
-            k_prod_m if self.chromatin_lattice[self.promoter_site] == 1 else 0,  
-            k_deg_m * mrna_count,  
-            k_hop * total_hop_weight,  
+            k_prod_s,                              # 0: prod_s
+            k_prod_n,                              # 1: prod_n
+            k_bind_s * sox2_free * unbound_sites,  # 2: bind_s
+            k_bind_n * nanog_free * unbound_sites, # 3: bind_n
+            k_deg_s * sox2_free,                   # 4: deg_s
+            k_deg_n * nanog_free,                  # 5: deg_n
+            k_unbind_s * sox2_bound,               # 6: unbind_s
+            k_unbind_n * nanog_bound,              # 7: unbind_n
+            k_prod_m if self.chromatin_lattice[self.promoter_site] == 1 else 0, # 8: prod_m (Any TF bound at promoter)
+            k_deg_m * mrna_count,                  # 9: deg_m
+            k_hop * total_hop_weight,              # 10: pair/hop
         ])
         return propensities, np.sum(propensities)
 
     def _execute_spatial_reaction(self, reaction_index):
-        """Track updates to the chromatin lattice array in case of binding/sliding.
-        
-        Handles three cases for the lattice: (1) bind, (2) unbind, (3) pair.
-        Updates the chromatin_lattice index position based on reaction choice.
-        
-        Args:
-            reaction_index: Index reference to the propensity array (which reaction was selected).
-        """
+        """Track updates to the chromatin lattice array in case of binding/sliding."""
         site_target, site_paired_with = -1, -1
 
-        if reaction_index == 1:  # bind reaction
+        if reaction_index == 2 or reaction_index == 3:  # bind reaction
             free_indices = np.where(self.is_free)[0]
             site_target = np.random.choice(free_indices)
             
+            tf_type = 1 if reaction_index == 2 else 2 # 1 = Sox2, 2 = Nanog
+            
             self.is_free[site_target] = False
             self.is_unpaired_bound[site_target] = True
-            self.chromatin_lattice[site_target] = 1
+            self.chromatin_lattice[site_target] = tf_type
             self.hop_weights -= self.kernel_matrix[:, site_target]
             
             self.site_bind_times[site_target] = self.t
             site_paired_with = 0 
 
-        elif reaction_index == 3:  # unbind reaction
-            bound_indices = np.where(~self.is_free)[0]
+        elif reaction_index == 6 or reaction_index == 7:  # unbind reaction
+            tf_type = 1 if reaction_index == 6 else 2
+            bound_indices = np.where(self.chromatin_lattice == tf_type)[0]
+            
             if len(bound_indices) > 0:
                 chosen_site = np.random.choice(bound_indices)
                 duration = self.t - self.site_bind_times[chosen_site]
@@ -276,60 +276,55 @@ class ModelCall:
                     self.bridged_to[paired_site] = -1
                     self.is_unpaired_bound[paired_site] = True 
                     
-                    self.parameter_states[0] -= 1  
-                    self.parameter_states[1] += 1  
+                    # Revert bulk unbind for the specific TF that was bridging
+                    if tf_type == 1:
+                        self.parameter_states[0] -= 1  
+                        self.parameter_states[2] += 1  
+                    else:
+                        self.parameter_states[1] -= 1  
+                        self.parameter_states[3] += 1  
                 else:
                     self.is_unpaired_bound[chosen_site] = False
                     
                 site_target = chosen_site
                 site_paired_with = 0 
 
-        elif reaction_index == 6:  # pair reaction
+        elif reaction_index == 10:  # pair reaction
             unpaired_indices = np.where(self.is_unpaired_bound)[0]
-            unpaired_weights = self.hop_weights[unpaired_indices]
-            
-            # check for free sites and select next site.
-            dwell_site = np.random.choice(unpaired_indices, p=(unpaired_weights / np.sum(unpaired_weights)))
-            dest_weights = self.kernel_matrix[dwell_site, :] * self.is_free
-            next_site = np.random.choice(self.n_binding_sites, p=(dest_weights / np.sum(dest_weights)))
+            if len(unpaired_indices) > 0:
+                unpaired_weights = self.hop_weights[unpaired_indices]
+                
+                dwell_site = np.random.choice(unpaired_indices, p=(unpaired_weights / np.sum(unpaired_weights)))
+                dest_weights = self.kernel_matrix[dwell_site, :] * self.is_free
+                
+                if np.sum(dest_weights) > 0:
+                    next_site = np.random.choice(self.n_binding_sites, p=(dest_weights / np.sum(dest_weights)))
 
-            # update chromatin_lattice accordingly
-            site_target, site_paired_with = dwell_site, next_site
-            self.is_free[next_site] = False
-            self.chromatin_lattice[next_site] = 1
-            self.hop_weights -= self.kernel_matrix[:, next_site]
-            self.is_unpaired_bound[dwell_site] = False 
-            
-            self.site_bind_times[next_site] = self.t
-            # in the bridged_to array, add the new bridged sites.
-            self.bridged_to[dwell_site] = next_site
-            self.bridged_to[next_site] = dwell_site
+                    site_target, site_paired_with = dwell_site, next_site
+                    self.is_free[next_site] = False
+                    
+                    # Carry over the correct TF type to the bridged site
+                    tf_type = self.chromatin_lattice[dwell_site]
+                    self.chromatin_lattice[next_site] = tf_type
+                    
+                    self.hop_weights -= self.kernel_matrix[:, next_site]
+                    self.is_unpaired_bound[dwell_site] = False 
+                    
+                    self.site_bind_times[next_site] = self.t
+                    self.bridged_to[dwell_site] = next_site
+                    self.bridged_to[next_site] = dwell_site
 
-        if self.track_history:
+        if self.track_history and site_target != -1:
             self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))
 
     def _record_snapshot(self):
-        """Record the current states of the simulation.
-        
-        
-        """
+        """Record the current states of the simulation."""
         self.times.append(self.t)
         self.bulk_states.append(self.parameter_states.copy())
         self.spatial_states.append(self.chromatin_lattice.copy())
 
     def _generate_dataframes(self):
-        """Setup model output dataframes.
-        
-        Returns:
-            A tuple of three Polars DataFrames:
-            - sim_variable_states_df: Polars df showing time evolution of system variables
-              with columns "time", "sox2_free", "sox2_bound", "mRNA".
-            - sim_site_dwell_times_df: Polars df storing residence times at any bound state 
-              during course of sim. With columns "dwell_site" and "dwell_time".
-            - sim_reaction_history_df: Polars df containing all reactions that occur 
-              within bound of simulation. Columns "time", "reaction_type", "site_target", 
-              "site_paired_with".
-        """
+        """Setup model output dataframes."""
         for i in range(self.n_binding_sites):
             if not self.is_free[i] and self.site_bind_times[i] != -1.0:
                 self.residence_time_states.append([i, self.t - self.site_bind_times[i]])
@@ -337,8 +332,10 @@ class ModelCall:
         self.sim_variable_states_df = pl.DataFrame({
             "time": self.times,
             "sox2_free": [s[0] for s in self.bulk_states],
-            "sox2_bound": [s[1] for s in self.bulk_states],
-            "mrna": [s[2] for s in self.bulk_states],
+            "nanog_free": [s[1] for s in self.bulk_states],
+            "sox2_bound": [s[2] for s in self.bulk_states],
+            "nanog_bound": [s[3] for s in self.bulk_states],
+            "mrna": [s[4] for s in self.bulk_states],
         })
         
         self.sim_site_dwell_times_df = pl.DataFrame(
@@ -353,14 +350,8 @@ class ModelCall:
         return self.sim_variable_states_df, self.sim_site_dwell_times_df, self.sim_reaction_history_df
 
     def run_trajectory(self):
-        """Run the Gillespie simulation.
-        
-        Contains all the core Gillespie logic for propagating the model through time.
-        
-        Returns:
-            The tuple of Polars DataFrames generated by the _generate_dataframes method.
-        """
-        self._initialize_state()
+        """Run the Gillespie simulation."""
+        self._initialise_state()
 
         while self.t < self.t_max:
             propensities, total_prop = self._calculate_propensities()
@@ -380,6 +371,3 @@ class ModelCall:
             self._execute_spatial_reaction(reaction_index)
 
         return self._generate_dataframes()
-    
-    
-

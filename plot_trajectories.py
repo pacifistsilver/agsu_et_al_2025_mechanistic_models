@@ -28,7 +28,7 @@ class ModelPlot:
     def __init__(self, model):
         self.spatial_states = model.spatial_states 
         self.n_binding_sites = model.n_binding_sites
-        self.sox2_simulation_variables = model.sox2_simulation_variables
+        self.sox2_simulation_variables = model.sox2_model_variables
         self.bulk_states = model.bulk_states
         self.times = model.times
         self.dwell_time_df = model.sim_site_dwell_times_df
@@ -73,22 +73,23 @@ class ModelPlot:
             
         return pd.DataFrame(results)
 
+    # rewrite to take into account we are only looking at one promoter
     def get_effective_transcription_rate(self) -> float:
         if not self.bulk_states:
             return 0.0
             
-        k_prod_m = self.sox2_simulation_variables[2] 
+        k_prod_m = self.sox2_simulation_variables.get("k_prod_m", 0.0)
+        sox2_bound_counts = [state[2] for state in self.bulk_states]
+        nanog_bound_counts = [state[3] for state in self.bulk_states]
         
-        # Extract the number of bound SOX2 molecules at each time step (index 1 of bulk_states)
-        bound_counts = [state[1] for state in self.bulk_states]
-        average_bound = sum(bound_counts) / len(bound_counts)
+        average_bound = sum(sox2_bound_counts + nanog_bound_counts) / len(self.bulk_states)
         
         return average_bound * k_prod_m
     
     def return_mRNA_data(self) -> float:
         if not self.bulk_states:
             return 0.0
-        mrna_counts = [state[2] for state in self.bulk_states]
+        mrna_counts = [state[4] for state in self.bulk_states]
         return (sum(mrna_counts), len(mrna_counts))
 
     def get_average_dwell_time(self) -> float:
@@ -113,55 +114,82 @@ class ModelPlot:
     # plot trajectories
     def plot_nucleosome_occupancy_history(self, filename: str = "nuc_history.png"):
         sns.set_theme(style="ticks")
-        custom_cmap = ListedColormap(["#e2e8f0", "#3b82f6"])
+        # 0=Unbound, 1=Sox2, 2=Nanog
+        custom_cmap = ListedColormap(["#e2e8f0", "#3b82f6", "#e67e22"])
         
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(self.spatial_states, cmap=custom_cmap, cbar=False, yticklabels="auto")
+        fig, ax = plt.subplots(figsize=(10, 8))
+        sns.heatmap(self.spatial_states, cmap=custom_cmap, cbar=False, yticklabels=False, ax=ax)
         
-        plt.title("Sox2 Nucleosome Occupancy Over Time", pad=15)
-        plt.xlabel(f"Nucleosome Index (0 to {self.n_binding_sites - 1})")
-        plt.ylabel("Time (Simulation Steps)")
+        ax.set_title("TF Nucleosome Occupancy and Pairing Over Time", pad=15)
+        ax.set_xlabel(f"Nucleosome Index (0 to {self.n_binding_sites - 1})")
+        ax.set_ylabel("Time (Simulation Snapshots)")
         
-        legend_elements = [Patch(facecolor="#e2e8f0", label="Unbound"), Patch(facecolor="#3b82f6", label="Sox2 Bound")]
-        plt.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1.25, 1))
+        if not self.simulation_reaction_history_df.is_empty():
+            pair_events = self.simulation_reaction_history_df.filter(
+                pl.col("reaction_type") == "pair"
+            )
+            
+            times_array = np.array(self.times)
+            
+            for row in pair_events.iter_rows(named=True):
+                t = row["time"]
+                s1 = row["site_target"]
+                s2 = row["site_paired_with"]
+                
+                y_idx = np.searchsorted(times_array, t)
+                ax.plot([s1 + 0.5, s2 + 0.5], [y_idx + 0.5, y_idx + 0.5], 
+                        color="#2c3e50", linewidth=1.5, alpha=0.8, zorder=5)
+                ax.scatter([s1 + 0.5, s2 + 0.5], [y_idx + 0.5, y_idx + 0.5], 
+                           color="#2c3e50", s=15, zorder=6)
+
+        legend_elements = [
+            Patch(facecolor="#e2e8f0", label="Unbound"), 
+            Patch(facecolor="#3b82f6", label="Sox2 Bound"), 
+            Patch(facecolor="#e67e22", label="NANOG Bound"),
+            plt.Line2D([0], [0], color="#2c3e50", lw=1.5, marker='o', markersize=5, label="Pairing Event")
+        ]
+        
+        ax.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1.30, 1))
         
         plt.tight_layout()
-        plt.savefig(filename)
+        plt.savefig(filename, dpi=300)
         plt.close()
     
     def plot_trajectory_and_noise(self, burn_in_fraction: float = 0.2) -> dict:
-        """Plots key variables over time from the initialised trajectory, and calculates the Fano factor and CV of the transcription rate.
-        
+        """Plots key variables over time from the initialised trajectory, and calculates the Fano factor and CV of the mRNA count.
         
         """
         if not self.bulk_states:
             print("No trajectory data found. Ensure the model has been run before plotting.")
-            return {"fano": 0.0, "cv": 0.0, "mean_rate": 0.0}
-
+            return {"fano": 0.0, "cv": 0.0, "mean_mrna": 0.0}
         times_array = np.array(self.times)
         sox2_free = np.array([state[0] for state in self.bulk_states])
-        sox2_bound = np.array([state[1] for state in self.bulk_states])
-        mrna = np.array([state[2] for state in self.bulk_states])
-        
-        k_prod_m = self.sox2_simulation_variables[2]
+        nanog_free = np.array([state[1] for state in self.bulk_states])
+        sox2_bound = np.array([state[2] for state in self.bulk_states])
+        nanog_bound = np.array([state[3] for state in self.bulk_states])
+        mrna = np.array([state[4] for state in self.bulk_states])        
+        # Kept for the subplot, but no longer used for stats
+        k_prod_m = self.sox2_simulation_variables.get("k_prod_m", 0.0)
         production_rate = sox2_bound * k_prod_m
         
+        # Isolate the steady-state portion of the mRNA array
         burn_in_idx = int(len(times_array) * burn_in_fraction)
-        steady_state_rate = production_rate[burn_in_idx:]
+        steady_state_mrna = mrna[burn_in_idx:]
         
-        if len(steady_state_rate) == 0:
-            return {"fano": 0.0, "cv": 0.0, "mean_rate": 0.0}
+        if len(steady_state_mrna) == 0:
+            return {"fano": 0.0, "cv": 0.0, "mean_mrna": 0.0}
             
-        mean_rate = np.mean(steady_state_rate)
-        var_rate = np.var(steady_state_rate)
+        # Calculate statistics based purely on mRNA counts
+        mean_mrna = np.mean(steady_state_mrna)
+        var_mrna = np.var(steady_state_mrna)
         
-        fano = var_rate / mean_rate if mean_rate > 0 else 0.0
-        cv = np.sqrt(var_rate) / mean_rate if mean_rate > 0 else 0.0
+        fano = var_mrna / mean_mrna if mean_mrna > 0 else 0.0
+        cv = np.sqrt(var_mrna) / mean_mrna if mean_mrna > 0 else 0.0
         
-        # 4. Plotting
+        # Plotting
         fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
         fig.suptitle(
-            f'Trajectory Dynamics\nProduction Rate Noise - Fano: {fano:.3f} | CV: {cv:.3f}', 
+            f'Trajectory Dynamics\nmRNA Noise - Fano: {fano:.3f} | CV: {cv:.3f}', 
             fontsize=14, y=0.95
         )
         
@@ -194,8 +222,7 @@ class ModelPlot:
         plt.tight_layout()
         plt.show()
         
-        return {"fano": fano, "cv": cv, "mean_rate": mean_rate}
-    
+        return {"fano": fano, "cv": cv, "mean_mrna": mean_mrna}    
 def run_1d_simulation_slice(args):
     """Runs a single stochastic simulation to extract mean AND standard deviation."""
     S, N, K1 = args
