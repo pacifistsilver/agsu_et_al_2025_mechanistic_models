@@ -27,6 +27,7 @@ from matplotlib.patches import Patch
 #   1. random starting scenarios according to some binomial distribution (i.e. random binding position for tf/none bound/ etc...)
 #   2. reassociation following hop should follow some gaussian distribution.
 #   3. add correct exceptions for all functions. 
+# assumption: only one sox2 only one nanog unbinds. they don't necessarily unbind together as a dimer. 
 
 class PartitionFunction: 
     """Calculate Rho (expected transcription rate) from the partition function.
@@ -154,7 +155,7 @@ class ModelCall:
         track_history (bool): If True, save reaction history.
     """
     def __init__(self, model_param: dict, model_var: dict, model_binding_sites: int, sim_max_time: int, record_interval: float = 1.0, track_history: bool = True):
-        """Initialize class instance.
+        """Initialise class instance.
         
         Args:
             model_param: Trajectory parameters.
@@ -172,21 +173,20 @@ class ModelCall:
         self.track_history = track_history
 
     def _initialize_state(self):
-        """Initialize simulation variables, parameters, and chromatin states.
+        """Initialise simulation variables, parameters, and chromatin states.
         
-        Initializes the stoichiometry, hopping kernel, reaction constants, etc.
+        Initialises the stoichiometry, hopping kernel, reaction constants, etc.
         """
         self.sox2_simulation_parameters = [self.sox2_model_parameters[key] for key in self.sox2_model_parameters]
         self.sox2_simulation_variables = [self.sox2_model_variables[key] for key in self.sox2_model_variables]
 
-        self.t = 0.0
-        self.next_record_time = 0.0
-        
-        self.is_free = np.ones(self.n_binding_sites, dtype=bool)
+        self.t = 0.0        
+        self.free_chromatin_sites = np.ones(self.n_binding_sites, dtype=bool)
         self.is_unpaired_bound = np.zeros(self.n_binding_sites, dtype=bool)
         self.chromatin_lattice = np.zeros(self.n_binding_sites, dtype=np.int8)
         self.parameter_states = np.array(self.sox2_simulation_parameters, dtype=np.int32)
         self.bridged_to = np.full(self.n_binding_sites, -1, dtype=np.int32)
+        self.chromatin_promoter = (len(self.chromatin_lattice) - 1)/2
         
         # Kernel & Hopping Weights
         self.kernel_matrix = np.ones((self.n_binding_sites, self.n_binding_sites), dtype=float)
@@ -201,8 +201,17 @@ class ModelCall:
         ], dtype=np.int32)
 
         self.reaction_names = {
-            0: "prod_s", 1: "bind", 2: "deg_s", 3: "unbind",
-            4: "prod_m", 5: "deg_m", 6: "pair"
+            0: "mRNA_prod",
+            1: "mRNA_deg", 
+            2: "hop", 
+            3: "NANOG:NANOG_homodimerisation",
+            4: "NANOG:SOX2_heterodimerisation", 
+            5: "NANOG_bind", 
+            6: "SOX2_bind",
+            7: "NANOG:SOX2_bind", 
+            8: "NANOG:NANOG_bind",
+            9: "SOX2_unbind",
+            10: "NANOG_unbind",
         }
 
         self.times, self.bulk_states, self.spatial_states, self.reaction_history, self.residence_time_states = [], [], [], [], []
@@ -215,20 +224,24 @@ class ModelCall:
             A tuple containing the propensities array for all chemical reactions 
             and the float sum of propensities of all chemical reactions.
         """
-        k_prod_s, k_deg_s, k_prod_m, k_deg_m, k_bind, k_unbind, k_hop, _ = self.sox2_simulation_variables
-        sox2_free, sox2_bound, mrna_count = self.parameter_states
+        k_prod_m, k_deg_m, k_hop, k_hom, k_het, k_b_ng, k_b_s2, k_b_s2ng_het, k_b_ng_hom, k_unbind_s2, k_unbind_ng, k_unbin = self.sox2_simulation_variables
+        s2_bulk, ng_bulk, s2_bound, ng_bound, s2ng_het_bulk, ng_hom_bulk, s2ng_het_bound, ng_hom_bound, mrna_count = self.parameter_states
         
-        unbound_sites = np.sum(self.is_free)
+        unbound_sites = np.sum(self.free_chromatin_sites)
         total_hop_weight = np.sum(self.hop_weights[self.is_unpaired_bound])
 
         propensities = np.array([
-            k_prod_s,  
-            k_bind * sox2_free * unbound_sites,  
-            k_deg_s * sox2_free,  
-            k_unbind * sox2_bound,  
-            k_prod_m * sox2_bound,  
+            k_prod_m * s2_bound,  
             k_deg_m * mrna_count,  
             k_hop * total_hop_weight,  
+            k_hom * ng_bulk * ng_bound,
+            k_het * s2_bulk * s2_bound,
+            k_b_ng * unbound_sites * ng_bulk,
+            k_b_s2 * unbound_sites * s2_bulk, # change to only look at promoter
+            k_b_s2ng_het * unbound_sites * s2ng_het_bulk, # change so that heterodimers/homodimers would need to select two sites
+            k_b_ng_hom * unbound_sites * ng_hom_bulk, 
+            k_unbind_s2 * s2_bound,
+            k_unbind_ng * ng_bound,
         ])
         return propensities, np.sum(propensities)
 
