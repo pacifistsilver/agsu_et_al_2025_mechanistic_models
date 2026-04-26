@@ -139,6 +139,11 @@ class PartitionFunction:
             numerator_sum += alpha_n * Zn
         return numerator_sum / Z_total if Z_total else 0.0    
 
+
+# TODO: 
+# 1. ModelCall method _execute_spatial or whatever doesn't store that when a bind reaction is drawn, 
+# it pairs two sites, but never stores this data in the reaction history time_log df
+
 class ModelCall:
     """Stochastic simulation of a single trajectory. 
     
@@ -272,7 +277,7 @@ class ModelCall:
             free_indices = np.where(self.is_free)[0]
             if len(free_indices) == 0: return
             
-            tf_type = 1 if reaction_index == 2 else 2 # 1 = Sox2, 2 = Nanog
+            tf_type = 1 if reaction_index == 2 else 2 # 1 = SOX2, 2 = NANOG
             
             if tf_type == 1:
                 m_free = self.parameter_states[m['sox2_monomer_free']]
@@ -286,6 +291,7 @@ class ModelCall:
             is_dimer = (np.random.rand() < d_free / total_free) if total_free > 0 else False
             
             # bind dimer
+            # todo: fix the fact that we dont track these paired sites.
             if is_dimer and len(free_indices) >= 2:
                 sites = np.random.choice(free_indices, 2, replace=False)
                 s1, s2 = sites[0], sites[1]
@@ -327,12 +333,25 @@ class ModelCall:
             if len(bound_indices) > 0:
                 chosen_site = np.random.choice(bound_indices)
                 duration = self.t - self.site_bind_times[chosen_site]
-                self.residence_time_states.append([chosen_site, duration])
                 self.site_bind_times[chosen_site] = -1.0 
                 
                 self.is_free[chosen_site] = True
                 self.chromatin_lattice[chosen_site] = 0
                 
+                
+                if self.bridged_to[chosen_site] != -1:
+                    paired_site_type = self.chromatin_lattice[self.bridged_to[chosen_site]]
+                    if (tf_type == 1 and paired_site_type == 2) or (tf_type == 2 and paired_site_type == 1):
+                        species_label = "SOX2:NANOG"
+                    else:
+                        species_label = "NANOG:NANOG"
+                else:
+                    species_label = "SOX2" if tf_type == 1 else "NANOG"
+                
+                self.residence_time_states.append([chosen_site, duration, species_label])                
+                self.site_bind_times[chosen_site] = -1.0 
+                self.is_free[chosen_site] = True
+                self.chromatin_lattice[chosen_site] = 0                
                 # site was a dimer
                 if self.bridged_to[chosen_site] != -1:
                     paired_site = self.bridged_to[chosen_site]
@@ -364,7 +383,7 @@ class ModelCall:
                         
                 site_target = chosen_site
                 site_paired_with = 0
-                self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))
+                self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))       
         elif reaction_index in [8, 9]:
             self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))
         elif reaction_index == 10:  # dimerise two bound tfs
@@ -403,9 +422,29 @@ class ModelCall:
 
     def _generate_dataframes(self):
         """Setup model output dataframes."""
+        # edge case: calculate residence time at the end of the simulation for existing bound
         for i in range(self.n_binding_sites):
                 if not self.is_free[i] and self.site_bind_times[i] != -1.0:
-                    self.residence_time_states.append([i, self.t - self.site_bind_times[i]])
+                    tf_type = self.chromatin_lattice[i]
+                
+                    # determine
+                    if self.bridged_to[i] != -1:
+                        partner = self.bridged_to[i]
+                        partner_type = self.chromatin_lattice[partner]
+                        
+                        # Prevent double-counting the same dimer complex
+                        if i > partner: 
+                            continue 
+                            
+                        if (tf_type == 1 and partner_type == 2) or (tf_type == 2 and partner_type == 1):
+                            species_label = "SOX2:NANOG"
+                        else:
+                            species_label = "NANOG:NANOG"
+                    else:
+                        species_label = "SOX2" if tf_type == 1 else "NANOG"
+
+                    self.residence_time_states.append([i, self.t - self.site_bind_times[i], species_label])
+                    
         state_data = {
                 name: [s[idx] for s in self.bulk_states]
             for name, idx in self.state_map.items()
@@ -413,11 +452,13 @@ class ModelCall:
         state_data["time"] = self.times
         
         self.sim_variable_states_df = pl.DataFrame(state_data)
-        
+        for s in self.residence_time_states:
+            print(s[1])
         self.sim_site_dwell_times_df = pl.DataFrame(
             {"dwell_site": [s[0] for s in self.residence_time_states], 
-            "dwell_time": [s[1] for s in self.residence_time_states]},
-            schema={"dwell_site": pl.Int64, "dwell_time": pl.Float64},
+             "dwell_time": [s[1] for s in self.residence_time_states],
+             "species": [s[2] for s in self.residence_time_states]},
+            schema={"dwell_site": pl.Int64, "dwell_time": pl.Float64, "species": str},
         )
         self.sim_reaction_history_df = pl.DataFrame(
             self.reaction_history, 

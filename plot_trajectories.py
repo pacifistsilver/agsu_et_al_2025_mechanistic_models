@@ -93,11 +93,16 @@ class ModelPlot:
         mrna_counts = [state[4] for state in self.bulk_states]
         return (sum(mrna_counts), len(mrna_counts))
 
-    def get_average_dwell_time(self) -> float:
+    def get_average_dwell_times_by_species(self) -> dict:
+        """Returns a dictionary mapping each TF species to its average dwell time."""
         if self.dwell_time_df.is_empty():
-            return 0.0
-        return self.dwell_time_df.select(pl.col("dwell_time").mean()).item()
-
+            return {}
+        
+        averages = self.dwell_time_df.group_by("species").agg(
+            pl.col("dwell_time").mean().alias("avg_time")
+        )
+        
+        return {row["species"]: row["avg_time"] for row in averages.iter_rows(named=True)}
     # Save model outputs to file
     def save_residence_time_log(self, filename: str = "time-log.txt"):
         residence_time_states = (
@@ -124,10 +129,10 @@ class ModelPlot:
         ax.set_xlabel("Nucleosome Index")
         ax.set_ylabel("Time (Snapshots)")
         
-        # Filter for dimerization events specifically
+        # Filter for dimerisation events specifically
         if not self.simulation_reaction_history_df.is_empty():
             dimer_events = self.simulation_reaction_history_df.filter(
-                pl.col("reaction_type") == "dimerise" # Matches new reaction name
+                pl.col("reaction_type") == "k_dimerise" # Matches new reaction name
             )
             
             times_array = np.array(self.times)
@@ -146,7 +151,8 @@ class ModelPlot:
         ax.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1.25, 1))
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close()   
-         
+    
+    # todo: add binding events rather tracking how much is boudn?
     def plot_trajectory_and_noise(self, burn_in_fraction: float = 0.2) -> dict:
         """Plots key variables over time from the initialised trajectory, and calculates the Fano factor and CV of the mRNA count.
         
