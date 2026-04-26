@@ -156,8 +156,12 @@ class ModelPlot:
             return {"fano": 0.0, "cv": 0.0, "mean_mrna": 0.0}
         m = self.state_map
         times = np.array(self.times)
-        sox2_free = np.array([s[m['sox2_monomer_free']] for s in self.bulk_states])
-        nanog_free = np.array([s[m['nanog_monomer_free']] for s in self.bulk_states])
+        
+        sox2_monomer_free = np.array([s[m['sox2_monomer_free']] for s in self.bulk_states])
+        nanog_monomer_free = np.array([s[m['nanog_monomer_free']] for s in self.bulk_states])
+        sox2_monomer_bound = np.array([s[m['sox2_monomer_bound']] for s in self.bulk_states])
+        nanog_monomer_bound = np.array([s[m['nanog_monomer_bound']] for s in self.bulk_states])
+
         mrna = np.array([s[m['mrna']] for s in self.bulk_states])        
         
         
@@ -169,14 +173,14 @@ class ModelPlot:
 
         fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
         axes[0].step(times, mrna, color='#9b59b6', label="mRNA")
-        axes[1].step(times, sox2_free, color='#3498db', label="Free Sox2")
-        axes[1].step(times, nanog_free, color='#2ecc71', label="Free Nanog")
-        axes[2].step(times, total_bound, color='#e67e22', label="Total Bound TFs")
+        axes[1].step(times, sox2_monomer_free, color='#3498db', label="Free SOX2")
+        axes[1].step(times, nanog_monomer_free, color='#2ecc71', label="Free NANOG")
+        axes[2].step(times, total_bound, color='#e67e22', label="All Bound Dimers and Monomers")
         
-        # Add specific plot for Dimer counts
+        # dimers
         ns_dimers = np.array([s[m['nanog_sox2_dimer_bound']] for s in self.bulk_states])
         nn_dimers = np.array([s[m['nanog_nanog_dimer_bound']] for s in self.bulk_states])
-        axes[3].stackplot(times, ns_dimers, nn_dimers, labels=['Sox2-Nanog Dimer', 'Nanog-Nanog Dimer'], colors=['#f1c40f', '#e74c3c'])
+        axes[3].stackplot(times, ns_dimers, nn_dimers, labels=['SOX2:NANOG Dimer', 'NANOG:NANOG Dimer'], colors=['#f1c40f', '#e74c3c'])
         
         for ax in axes:
             ax.legend(loc='upper right')

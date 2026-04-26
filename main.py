@@ -318,7 +318,8 @@ class ModelCall:
                 else:
                     self.parameter_states[m['nanog_monomer_free']] -= 1
                     self.parameter_states[m['nanog_monomer_bound']] += 1
-            
+            self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))
+
         elif reaction_index in [6, 7]:  # unbind reaction
             tf_type = 1 if reaction_index == 6 else 2
             bound_indices = np.where(self.chromatin_lattice == tf_type)[0]
@@ -363,6 +364,9 @@ class ModelCall:
                         
                 site_target = chosen_site
                 site_paired_with = 0
+                self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))
+        elif reaction_index in [8, 9]:
+            self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))
         elif reaction_index == 10:  # dimerise two bound tfs
             total_w = np.sum(self.current_pair_weights)
             if total_w > 0:

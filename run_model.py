@@ -2,7 +2,7 @@ from plot_trajectories import ModelPlot
 from main import ModelCall
 
 model_param = {
-    "sox2_monomer_free": 2, 
+    "sox2_monomer_free": 1, 
     "nanog_monomer_free": 1, 
     "sox2_monomer_bound": 0, 
     "nanog_monomer_bound": 0, 
@@ -37,3 +37,4 @@ model.run_trajectory()
 model_plot = ModelPlot(model=model)
 model_plot.plot_trajectory_and_noise()
 model_plot.plot_nucleosome_occupancy_history()
+model_plot.save_reaction_history_log()
