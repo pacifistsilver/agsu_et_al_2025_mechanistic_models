@@ -141,8 +141,7 @@ class PartitionFunction:
 
 
 # TODO: 
-# 1. ModelCall method _execute_spatial or whatever doesn't store that when a bind reaction is drawn, 
-# it pairs two sites, but never stores this data in the reaction history time_log df
+# 1. add in dissociation between dimers while unbound.
 
 class ModelCall:
     """Stochastic simulation of a single trajectory. 
@@ -242,7 +241,10 @@ class ModelCall:
         
         self.current_pair_weights = self.kernel_matrix * valid_pair_matrix
         total_pair_weight = np.sum(self.current_pair_weights)
-
+        
+        bulk_nn_pairs = nanog_monomer_free * (nanog_monomer_free - 1) / 2.0
+        bulk_sn_pairs = sox2_monomer_free * nanog_monomer_free
+        total_bulk_pairs = bulk_nn_pairs + bulk_sn_pairs
         
         promoter_has_sox2 = (
             self.chromatin_lattice[self.promoter_site] == 1 or 
@@ -264,7 +266,8 @@ class ModelCall:
                 v.get('k_unbind_n', 0.0) * (nanog_monomer_bound + nanog_nanog_dimer_bound),               # 7
                 v.get('k_prod_m', 0.0) if promoter_has_sox2 else 0.0, # 8
                 v.get('k_deg_m', 0.0) * mrna_count,                   # 9
-                v.get('k_dimerise', 0.0) * total_pair_weight          # 10            ])
+                v.get('k_dimerise', 0.0) * total_pair_weight,         # site dimerisation     
+                v.get('k_dimerise', 0.0) * total_bulk_pairs # bulk dimerisation
         ])
         return propensities, np.sum(propensities)
 
@@ -291,8 +294,6 @@ class ModelCall:
             is_dimer = (np.random.rand() < d_free / total_free) if total_free > 0 else False
             
             # bind dimer
-            # todo: fix the fact that we dont track these paired sites.
-            # also maybe reduce the probability of binding a dimer when the two sites are far away from each other?
             if is_dimer and len(free_indices) >= 2:
                 sites = np.random.choice(free_indices, 2, replace=False)
                 s1, s2 = sites[0], sites[1]
@@ -391,8 +392,8 @@ class ModelCall:
             if self.track_history:
                 self.reaction_history.append((self.t, self.reaction_names[reaction_index], -1, -1))
             return
-        elif reaction_index == 10:  # dimerise two bound tfs
-            total_w = np.sum(self.current_pair_weights)
+        elif reaction_index == 10:  # site dimerisation
+            total_w = np.sum(self.current_pair_weights)        
             if total_w > 0:
                 # randomly choose pair
                 flat_weights = self.current_pair_weights.flatten()
@@ -419,6 +420,27 @@ class ModelCall:
         if self.track_history and site_target != -1:
             self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))
 
+        elif reaction_index == 11: # bulk dimerisation
+            s_free = self.parameter_states[m['sox2_monomer_free']]
+            n_free = self.parameter_states[m['nanog_monomer_free']]
+            
+            nn_pairs = n_free * (n_free - 1) / 2.0
+            sn_pairs = s_free * n_free
+            total_pairs = nn_pairs + sn_pairs
+            
+            if total_pairs > 0:
+                is_nanog = (np.random.rand() < nn_pairs / total_pairs)
+                
+                if is_nanog and n_free >= 2:
+                    self.parameter_states[m['nanog_nanog_dimer_free']] += 1
+                    self.parameter_states[m['nanog_monomer_free']] -= 2
+                elif not is_nanog and s_free >= 1 and n_free >= 1:
+                    self.parameter_states[m['nanog_sox2_dimer_free']] += 1
+                    self.parameter_states[m['sox2_monomer_free']] -= 1
+                    self.parameter_states[m['nanog_monomer_free']] -= 1
+            
+            site_target, site_paired_with = -1, -1
+        
     def _record_snapshot(self):
         """Record the current states of the simulation."""
         self.times.append(self.t)
@@ -457,8 +479,6 @@ class ModelCall:
         state_data["time"] = self.times
         
         self.sim_variable_states_df = pl.DataFrame(state_data)
-        for s in self.residence_time_states:
-            print(s[1])
         self.sim_site_dwell_times_df = pl.DataFrame(
             {"dwell_site": [s[0] for s in self.residence_time_states], 
              "dwell_time": [s[1] for s in self.residence_time_states],
