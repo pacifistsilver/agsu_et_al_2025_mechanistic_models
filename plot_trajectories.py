@@ -156,13 +156,13 @@ class ModelPlot:
             return {"fano": 0.0, "cv": 0.0, "mean_mrna": 0.0}
         m = self.state_map
         times = np.array(self.times)
-        sox2_free = np.array([s[m['sox2_free']] for s in self.bulk_states])
-        nanog_free = np.array([s[m['nanog_free']] for s in self.bulk_states])
+        sox2_free = np.array([s[m['sox2_monomer_free']] for s in self.bulk_states])
+        nanog_free = np.array([s[m['nanog_monomer_free']] for s in self.bulk_states])
         mrna = np.array([s[m['mrna']] for s in self.bulk_states])        
         
         
         total_bound = np.array([
-            s[m['sox2_bound']] + s[m['nanog_bound']] + 
+            s[m['sox2_monomer_bound']] + s[m['nanog_monomer_bound']] + 
             s[m['nanog_sox2_dimer_bound']] + (2 * s[m['nanog_nanog_dimer_bound']])
             for s in self.bulk_states
         ])
