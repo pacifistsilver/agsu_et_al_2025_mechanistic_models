@@ -292,6 +292,7 @@ class ModelCall:
             
             # bind dimer
             # todo: fix the fact that we dont track these paired sites.
+            # also maybe reduce the probability of binding a dimer when the two sites are far away from each other?
             if is_dimer and len(free_indices) >= 2:
                 sites = np.random.choice(free_indices, 2, replace=False)
                 s1, s2 = sites[0], sites[1]
@@ -309,7 +310,8 @@ class ModelCall:
                     self.chromatin_lattice[s1], self.chromatin_lattice[s2] = 2, 2
                     self.parameter_states[m['nanog_nanog_dimer_free']] -= 1
                     self.parameter_states[m['nanog_nanog_dimer_bound']] += 1
-            
+
+                site_target, site_paired_with = s1, s2
             # bind monomer            
             elif len(free_indices) >= 1:
                 site_target = np.random.choice(free_indices)
@@ -324,6 +326,9 @@ class ModelCall:
                 else:
                     self.parameter_states[m['nanog_monomer_free']] -= 1
                     self.parameter_states[m['nanog_monomer_bound']] += 1
+            
+                site_paired_with = -1
+                
             self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))
 
         elif reaction_index in [6, 7]:  # unbind reaction
@@ -334,11 +339,8 @@ class ModelCall:
                 chosen_site = np.random.choice(bound_indices)
                 duration = self.t - self.site_bind_times[chosen_site]
                 self.site_bind_times[chosen_site] = -1.0 
-                
-                self.is_free[chosen_site] = True
-                self.chromatin_lattice[chosen_site] = 0
-                
-                
+                                
+                # calculate residence time
                 if self.bridged_to[chosen_site] != -1:
                     paired_site_type = self.chromatin_lattice[self.bridged_to[chosen_site]]
                     if (tf_type == 1 and paired_site_type == 2) or (tf_type == 2 and paired_site_type == 1):
@@ -349,6 +351,7 @@ class ModelCall:
                     species_label = "SOX2" if tf_type == 1 else "NANOG"
                 
                 self.residence_time_states.append([chosen_site, duration, species_label])                
+                
                 self.site_bind_times[chosen_site] = -1.0 
                 self.is_free[chosen_site] = True
                 self.chromatin_lattice[chosen_site] = 0                
@@ -382,10 +385,12 @@ class ModelCall:
                         self.parameter_states[m['nanog_monomer_free']] += 1
                         
                 site_target = chosen_site
-                site_paired_with = 0
+                site_paired_with = -1
                 self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))       
         elif reaction_index in [8, 9]:
-            self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))
+            if self.track_history:
+                self.reaction_history.append((self.t, self.reaction_names[reaction_index], -1, -1))
+            return
         elif reaction_index == 10:  # dimerise two bound tfs
             total_w = np.sum(self.current_pair_weights)
             if total_w > 0:

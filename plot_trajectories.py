@@ -118,7 +118,7 @@ class ModelPlot:
         df_out.write_csv(filename)
     
     # plot trajectories
-    def plot_nucleosome_occupancy_history(self, filename: str = "nuc_history.png"):
+    def plot_site_occupancy_history(self, filename: str = "nuc_history.png"):
         sns.set_theme(style="ticks")
         custom_cmap = ListedColormap(["#e2e8f0", "#3b82f6", "#e67e22"])
         
@@ -129,29 +129,29 @@ class ModelPlot:
         ax.set_xlabel("Nucleosome Index")
         ax.set_ylabel("Time (Snapshots)")
         
-        # Filter for dimerisation events specifically
+        # Filter for dimerisation events specifically (both direct binding of dimer and dimerisation while on site)
         if not self.simulation_reaction_history_df.is_empty():
             dimer_events = self.simulation_reaction_history_df.filter(
-                pl.col("reaction_type") == "k_dimerise" # Matches new reaction name
+                (pl.col("reaction_type") == "k_dimerise") | 
+                (pl.col("reaction_type").is_in(["bind_s", "bind_n"]) & (pl.col("site_paired_with") != -1))
             )
             
             times_array = np.array(self.times)
             for row in dimer_events.iter_rows(named=True):
                 t, s1, s2 = row["time"], row["site_target"], row["site_paired_with"]
                 y_idx = np.searchsorted(times_array, t)
-                # Draw bridge line between dimerized sites
                 ax.plot([s1 + 0.5, s2 + 0.5], [y_idx + 0.5, y_idx + 0.5], 
                         color="black", linewidth=2.0, alpha=0.9, zorder=10)
 
         legend_elements = [
-            Patch(facecolor="#3b82f6", label="Sox2"), 
-            Patch(facecolor="#e67e22", label="Nanog"),
-            plt.Line2D([0], [0], color="black", lw=2, label="Dimer Bridge")
+            Patch(facecolor="#3b82f6", label="SOX2"), 
+            Patch(facecolor="#e67e22", label="NANOG"),
+            plt.Line2D([0], [0], color="black", lw=2, label="Dimer")
         ]
         ax.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1.25, 1))
         plt.savefig(filename, dpi=300, bbox_inches='tight')
-        plt.close()   
-    
+        plt.close()
+            
     # todo: add binding events rather tracking how much is boudn?
     def plot_trajectory_and_noise(self, burn_in_fraction: float = 0.2) -> dict:
         """Plots key variables over time from the initialised trajectory, and calculates the Fano factor and CV of the mRNA count.
