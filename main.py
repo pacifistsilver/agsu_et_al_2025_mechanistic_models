@@ -166,7 +166,7 @@ class ModelCall:
             self.sox2_model_parameters.get('nanog_free', 0),
             self.sox2_model_parameters.get('sox2_bound', 0),
             self.sox2_model_parameters.get('nanog_bound', 0),
-            self.sox2_model_parameters.get('mrna_count', 0)
+            self.sox2_model_parameters.get('mrna_count', 0),
         ], dtype=np.int32)
 
         self.t = 0.0
@@ -185,18 +185,23 @@ class ModelCall:
         self.current_pair_weights = np.zeros_like(self.kernel_matrix)
 
         self.stoichiometry_matrix = np.array([
-            # prod_s, prod_n, bind_s, bind_n, deg_s, deg_n, unbind_s, unbind_n, prod_m, deg_m, dimerise
-            [ 1,      0,     -1,      0,     -1,     0,      1,        0,        0,      0,     0], # sox2_free
-            [ 0,      1,      0,     -1,      0,    -1,      0,        1,        0,      0,     0], # nanog_free
-            [ 0,      0,      1,      0,      0,     0,     -1,        0,        0,      0,     0], # sox2_bound
-            [ 0,      0,      0,      1,      0,     0,      0,       -1,        0,      0,     0], # nanog_bound
-            [ 0,      0,      0,      0,      0,     0,      0,        0,        1,     -1,     0], # mrna
-        ], dtype=np.int32)
+                # Reaction Index:  0   1   2   3   4   5   6   7   8   9   10
+                #                 ps  pn  bs  bn  ds  dn  us  un  pm  dm  dim
+                [ 1,  0, -1,  0, -1,  0,  1,  0,  0,  0,  0], # 0: sox2_free
+                [ 0,  1,  0, -1,  0, -1,  0,  1,  0,  0,  0], # 1: nanog_free
+                [ 0,  0,  1,  0,  0,  0, -1,  0,  0,  0,  0], # 2: sox2_bound
+                [ 0,  0,  0,  1,  0,  0,  0, -1,  0,  0,  0], # 3: nanog_bound
+                [ 0,  0,  0,  0,  0,  0,  0,  0,  1, -1,  0], # 4: mrna
+                [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # 5: ns_dimer_bound 
+                [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # 6: nn_dimer_bound 
+                [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # 7: ns_dimer_free
+                [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # 8: nn_dimer_free
+            ], dtype=np.int32)
 
         self.reaction_names = {
             0: "prod_s", 1: "prod_n", 2: "bind_s", 3: "bind_n", 
             4: "deg_s", 5: "deg_n", 6: "unbind_s", 7: "unbind_n",
-            8: "prod_m", 9: "deg_m", 10: "pair"
+            8: "prod_m", 9: "deg_m", 10: "k_dimerise"
         }
 
         self.times, self.bulk_states, self.spatial_states, self.reaction_history, self.residence_time_states = [], [], [], [], []
@@ -215,9 +220,9 @@ class ModelCall:
         k_unbind_n = v.get('k_unbind_n', v.get('k_unbind', 0.0))
         k_prod_m = v.get('k_prod_m', 0.0)
         k_deg_m = v.get('k_deg_m', 0.0)
-        k_hop = v.get('k_hop', 0.0)
+        k_dimerise = v.get('k_dimerise', 0.0)
         
-        sox2_free, nanog_free, sox2_bound, nanog_bound, mrna_count = self.parameter_states
+        sox2_free, nanog_free, sox2_bound, nanog_bound, nanog_sox2_dimer_bound, nanog_nanog_dimer_bound, nanog_sox2_dimer_free, nanog_nanog_dimer_free, mrna_count = self.parameter_states
         
         unbound_sites = np.sum(self.is_free)
         
@@ -246,7 +251,7 @@ class ModelCall:
             k_unbind_n * nanog_bound,              # 7: unbind_n
             k_prod_m if self.chromatin_lattice[self.promoter_site] == 1 else 0, # 8: prod_m
             k_deg_m * mrna_count,                  # 9: deg_m
-            k_hop * total_pair_weight,             # 10: dimerise
+            k_dimerise * total_pair_weight,             # 10: dimerise
         ])
         return propensities, np.sum(propensities)
 
