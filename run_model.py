@@ -1,17 +1,27 @@
 from plot_trajectories import ModelPlot
 from main import ModelCall
 
-model_param = {"sox2_free": 1,"nanog_free":10, "sox2_bound": 0, "nanog_bound": 0, "mrna_count": 0}
+model_param = {
+    "sox2_free": 2, 
+    "nanog_free": 1, 
+    "sox2_bound": 0, 
+    "nanog_bound": 0, 
+    "nanog_sox2_dimer_bound": 0, 
+    "nanog_nanog_dimer_bound": 0,
+    "nanog_sox2_dimer_free": 0,
+    "nanog_nanog_dimer_free": 0,
+    "mrna": 0
+}
+
 model_var = {
     "k_prod_s": 0.0, "k_deg_s": 0.0, 
     "k_prod_n": 0.0, "k_deg_n": 0.0,
+    "k_bind_s": 1.0, "k_unbind_s": 0.06,
     "k_bind_n": 1.0, "k_unbind_n": 1.4,
-    "k_prod_m": 1.0, "k_deg_m": 0.53, 
-    "k_bind": 1, "k_unbind": 0.06, 
-    "k_hop": 1.0, "extra": 1.0
+    "k_dimerise": 1,  
+    "k_prod_m": 1.0,    
+    "k_deg_m": 0.53, 
 }
-# k_unbind_n, k_deg_m, k_prod_M, k_unbind_s known
-
 
 sim_max_time = 100
 model = ModelCall(

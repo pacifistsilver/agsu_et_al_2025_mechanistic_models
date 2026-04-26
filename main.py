@@ -169,6 +169,15 @@ class ModelCall:
             self.sox2_model_parameters.get('mrna_count', 0),
         ], dtype=np.int32)
 
+        self.state_names = [
+            "sox2_free", "nanog_free", "sox2_bound", "nanog_bound",
+            "nanog_sox2_dimer_bound", "nanog_nanog_dimer_bound",
+            "nanog_sox2_dimer_free", "nanog_nanog_dimer_free", "mrna"
+        ]
+        self.state_map = {name: i for i, name in enumerate(self.state_names)}
+        self.parameter_states = np.zeros(len(self.state_names), dtype=np.int32)
+        for name, idx in self.state_map.items():
+            self.parameter_states[idx] = self.sox2_model_parameters.get(name, 0)
         self.t = 0.0
         self.next_record_time = 0.0
         
@@ -185,19 +194,16 @@ class ModelCall:
         self.current_pair_weights = np.zeros_like(self.kernel_matrix)
 
         self.stoichiometry_matrix = np.array([
-                # Reaction Index:  0   1   2   3   4   5   6   7   8   9   10
-                #                 ps  pn  bs  bn  ds  dn  us  un  pm  dm  dim
                 [ 1,  0, -1,  0, -1,  0,  1,  0,  0,  0,  0], # 0: sox2_free
                 [ 0,  1,  0, -1,  0, -1,  0,  1,  0,  0,  0], # 1: nanog_free
                 [ 0,  0,  1,  0,  0,  0, -1,  0,  0,  0,  0], # 2: sox2_bound
                 [ 0,  0,  0,  1,  0,  0,  0, -1,  0,  0,  0], # 3: nanog_bound
-                [ 0,  0,  0,  0,  0,  0,  0,  0,  1, -1,  0], # 4: mrna
-                [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # 5: ns_dimer_bound 
-                [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # 6: nn_dimer_bound 
-                [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # 7: ns_dimer_free
-                [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # 8: nn_dimer_free
+                [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # 4: ns_dimer_bound 
+                [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # 5: nn_dimer_bound 
+                [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # 6: ns_dimer_free
+                [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0], # 7: nn_dimer_free
+                [ 0,  0,  0,  0,  0,  0,  0,  0,  1, -1,  0], # 8: mrna
             ], dtype=np.int32)
-
         self.reaction_names = {
             0: "prod_s", 1: "prod_n", 2: "bind_s", 3: "bind_n", 
             4: "deg_s", 5: "deg_n", 6: "unbind_s", 7: "unbind_n",
@@ -210,20 +216,13 @@ class ModelCall:
     def _calculate_propensities(self):
         """Update and return new propensities."""
         v = self.sox2_model_variables
-        k_prod_s = v.get('k_prod_s', 0.0)
-        k_prod_n = v.get('k_prod_n', 0.0)
-        k_deg_s = v.get('k_deg_s', 0.0)
-        k_deg_n = v.get('k_deg_n', 0.0)
-        k_bind_s = v.get('k_bind_s', v.get('k_bind', 0.0))
-        k_bind_n = v.get('k_bind_n', v.get('k_bind', 0.0))
-        k_unbind_s = v.get('k_unbind_s', v.get('k_unbind', 0.0))
-        k_unbind_n = v.get('k_unbind_n', v.get('k_unbind', 0.0))
-        k_prod_m = v.get('k_prod_m', 0.0)
-        k_deg_m = v.get('k_deg_m', 0.0)
-        k_dimerise = v.get('k_dimerise', 0.0)
+        m = self.state_map
         
-        sox2_free, nanog_free, sox2_bound, nanog_bound, nanog_sox2_dimer_bound, nanog_nanog_dimer_bound, nanog_sox2_dimer_free, nanog_nanog_dimer_free, mrna_count = self.parameter_states
-        
+        sox2_free = self.parameter_states[m['sox2_free']]
+        nanog_free = self.parameter_states[m['nanog_free']]
+        sox2_bound = self.parameter_states[m['sox2_bound']]
+        nanog_bound = self.parameter_states[m['nanog_bound']]
+        mrna_count = self.parameter_states[m['mrna']]        
         unbound_sites = np.sum(self.is_free)
         
         u_s_mask = (self.chromatin_lattice == 1) & self.is_unpaired_bound
@@ -240,39 +239,47 @@ class ModelCall:
         self.current_pair_weights = self.kernel_matrix * valid_pair_matrix
         total_pair_weight = np.sum(self.current_pair_weights)
 
+        
+        promoter_has_sox2 = (
+            self.chromatin_lattice[self.promoter_site] == 1 or 
+            (self.chromatin_lattice[self.promoter_site] == 2 and 
+            self.bridged_to[self.promoter_site] != -1 and 
+            self.chromatin_lattice[self.bridged_to[self.promoter_site]] == 1)
+        )
+        
         propensities = np.array([
-            k_prod_s,                              # 0: prod_s
-            k_prod_n,                              # 1: prod_n
-            k_bind_s * sox2_free * unbound_sites,  # 2: bind_s
-            k_bind_n * nanog_free * unbound_sites, # 3: bind_n
-            k_deg_s * sox2_free,                   # 4: deg_s
-            k_deg_n * nanog_free,                  # 5: deg_n
-            k_unbind_s * sox2_bound,               # 6: unbind_s
-            k_unbind_n * nanog_bound,              # 7: unbind_n
-            k_prod_m if self.chromatin_lattice[self.promoter_site] == 1 else 0, # 8: prod_m
-            k_deg_m * mrna_count,                  # 9: deg_m
-            k_dimerise * total_pair_weight,             # 10: dimerise
-        ])
+                v.get('k_prod_s', 0.0),                               # 0
+                v.get('k_prod_n', 0.0),                               # 1
+                v.get('k_bind_s', 0.0) * sox2_free * unbound_sites,      # 2
+                v.get('k_bind_n', 0.0) * nanog_free * unbound_sites,      # 3
+                v.get('k_deg_s', 0.0) * sox2_free,                       # 4
+                v.get('k_deg_n', 0.0) * nanog_free,                       # 5
+                v.get('k_unbind_s', 0.0) * sox2_bound,                   # 6
+                v.get('k_unbind_n', 0.0) * nanog_bound,                   # 7
+                v.get('k_prod_m', 0.0) if promoter_has_sox2 else 0.0, # 8: prod_m
+                v.get('k_deg_m', 0.0) * mrna_count,                   # 9
+                v.get('k_dimerise', 0.0) * total_pair_weight,         # 10
+            ])
         return propensities, np.sum(propensities)
 
     def _execute_spatial_reaction(self, reaction_index):
         """Track updates to the chromatin lattice array in case of binding/sliding."""
         site_target, site_paired_with = -1, -1
-
+        m = self.state_map
+        
         if reaction_index == 2 or reaction_index == 3:  # bind reaction
             free_indices = np.where(self.is_free)[0]
             site_target = np.random.choice(free_indices)
             
             tf_type = 1 if reaction_index == 2 else 2 # 1 = Sox2, 2 = Nanog
             
-            self.is_free[site_target] = False
-            self.is_unpaired_bound[site_target] = True
+            self.is_free[site_target], self.is_unpaired_bound[site_target] = False, True            
             self.chromatin_lattice[site_target] = tf_type
             
             self.site_bind_times[site_target] = self.t
-            site_paired_with = 0 
+            self.chromatin_lattice[site_target], self.site_bind_times[site_target] = tf_type, self.t
 
-        elif reaction_index == 6 or reaction_index == 7:  # unbind reaction
+        elif reaction_index in [6, 7]:  # unbind reaction
             tf_type = 1 if reaction_index == 6 else 2
             bound_indices = np.where(self.chromatin_lattice == tf_type)[0]
             
@@ -285,11 +292,27 @@ class ModelCall:
                 self.is_free[chosen_site] = True
                 self.chromatin_lattice[chosen_site] = 0
                 
+                # dimer logic: check if the chosen site is part of a dimer
                 if self.bridged_to[chosen_site] != -1:
                     paired_site = self.bridged_to[chosen_site]
+                    paired_site_type = self.chromatin_lattice[paired_site]
                     self.bridged_to[chosen_site] = -1
                     self.bridged_to[paired_site] = -1
                     self.is_unpaired_bound[paired_site] = True 
+                    
+                    if tf_type == 1 and paired_site_type == 2 or tf_type == 2 and paired_site_type == 1:
+                        self.parameter_states[5] -= 1  # ns_dimer_bound
+                    elif tf_type == 2 and paired_site_type == 2:
+                        self.parameter_states[6] -= 1  # nn_dimer_bound
+                    
+                    if paired_site_type == 1: self.parameter_states[2] += 1
+                    if paired_site_type == 2: self.parameter_states[3] += 1
+                    
+                    self.is_unpaired_bound[paired_site] = True
+                    self.parameter_states[m['sox2_bound' if paired_site_type == 1 else 'nanog_bound']] += 1
+                
+                    self.bridged_to[chosen_site] = self.bridged_to[paired_site] = -1
+                    
                 else:
                     self.is_unpaired_bound[chosen_site] = False
                     
@@ -302,16 +325,25 @@ class ModelCall:
                 # randomly choose pair
                 flat_weights = self.current_pair_weights.flatten()
                 chosen_idx = np.random.choice(len(flat_weights), p=(flat_weights / total_w))
-                
                 dwell_site, next_site = divmod(chosen_idx, self.n_binding_sites)
                 site_target, site_paired_with = dwell_site, next_site
                 
-                self.is_unpaired_bound[dwell_site] = False 
-                self.is_unpaired_bound[next_site] = False 
+                chromatin_dwell_site = self.chromatin_lattice[dwell_site]
+                chromatin_next_site = self.chromatin_lattice[next_site]
                 
-                self.bridged_to[dwell_site] = next_site
-                self.bridged_to[next_site] = dwell_site
-
+                if (chromatin_dwell_site == 1 and chromatin_next_site == 2) or (chromatin_dwell_site == 2 and chromatin_next_site == 1):
+                    self.parameter_states[m['nanog_sox2_dimer_bound']] += 1
+                    self.parameter_states[m['sox2_bound']] -= 1
+                    self.parameter_states[m['nanog_bound']] -= 1
+                elif chromatin_dwell_site == 2 and chromatin_next_site == 2:
+                    self.parameter_states[m['nanog_nanog_dimer_bound']] += 1
+                    self.parameter_states[m['nanog_bound']] -= 2                
+                
+                self.is_unpaired_bound[dwell_site] = self.is_unpaired_bound[next_site] = False 
+                
+                self.bridged_to[dwell_site], self.bridged_to[next_site] = next_site, dwell_site
+                site_target, site_paired_with = dwell_site, next_site
+                
         if self.track_history and site_target != -1:
             self.reaction_history.append((self.t, self.reaction_names[reaction_index], site_target, site_paired_with))
 
@@ -324,27 +356,25 @@ class ModelCall:
     def _generate_dataframes(self):
         """Setup model output dataframes."""
         for i in range(self.n_binding_sites):
-            if not self.is_free[i] and self.site_bind_times[i] != -1.0:
-                self.residence_time_states.append([i, self.t - self.site_bind_times[i]])
-
-        self.sim_variable_states_df = pl.DataFrame({
-            "time": self.times,
-            "sox2_free": [s[0] for s in self.bulk_states],
-            "nanog_free": [s[1] for s in self.bulk_states],
-            "sox2_bound": [s[2] for s in self.bulk_states],
-            "nanog_bound": [s[3] for s in self.bulk_states],
-            "mrna": [s[4] for s in self.bulk_states],
-        })
+                if not self.is_free[i] and self.site_bind_times[i] != -1.0:
+                    self.residence_time_states.append([i, self.t - self.site_bind_times[i]])
+        state_data = {
+                name: [s[idx] for s in self.bulk_states]
+            for name, idx in self.state_map.items()
+        }
+        state_data["time"] = self.times
+        
+        self.sim_variable_states_df = pl.DataFrame(state_data)
         
         self.sim_site_dwell_times_df = pl.DataFrame(
-            {"dwell_site": [s[0] for s in self.residence_time_states], "dwell_time": [s[1] for s in self.residence_time_states]},
+            {"dwell_site": [s[0] for s in self.residence_time_states], 
+            "dwell_time": [s[1] for s in self.residence_time_states]},
             schema={"dwell_site": pl.Int64, "dwell_time": pl.Float64},
         )
-
         self.sim_reaction_history_df = pl.DataFrame(
             self.reaction_history, 
             schema=["time", "reaction_type", "site_target", "site_paired_with"]
-        )            
+        )      
         return self.sim_variable_states_df, self.sim_site_dwell_times_df, self.sim_reaction_history_df
 
     def run_trajectory(self):

@@ -33,7 +33,8 @@ class ModelPlot:
         self.times = model.times
         self.dwell_time_df = model.sim_site_dwell_times_df
         self.simulation_reaction_history_df = model.sim_reaction_history_df
-
+        self.state_map = model.state_map
+        
     # Retrieve model data
     @staticmethod
     def generate_thermodynamic_expectation_rho(S_vals, N_vals, K1_vals, c=1.0, alpha=1.0):
@@ -77,7 +78,7 @@ class ModelPlot:
     def get_effective_transcription_rate(self) -> float:
         if not self.bulk_states:
             return 0.0
-            
+        m = self.state_map
         k_prod_m = self.sox2_simulation_variables.get("k_prod_m", 0.0)
         sox2_bound_counts = [state[2] for state in self.bulk_states]
         nanog_bound_counts = [state[3] for state in self.bulk_states]
@@ -114,47 +115,38 @@ class ModelPlot:
     # plot trajectories
     def plot_nucleosome_occupancy_history(self, filename: str = "nuc_history.png"):
         sns.set_theme(style="ticks")
-        # 0=Unbound, 1=Sox2, 2=Nanog
         custom_cmap = ListedColormap(["#e2e8f0", "#3b82f6", "#e67e22"])
         
         fig, ax = plt.subplots(figsize=(10, 8))
         sns.heatmap(self.spatial_states, cmap=custom_cmap, cbar=False, yticklabels=False, ax=ax)
         
-        ax.set_title("TF Nucleosome Occupancy and Pairing Over Time", pad=15)
-        ax.set_xlabel(f"Nucleosome Index (0 to {self.n_binding_sites - 1})")
-        ax.set_ylabel("Time (Simulation Snapshots)")
+        ax.set_title("TF Occupancy and Dimerization Over Time", pad=15)
+        ax.set_xlabel("Nucleosome Index")
+        ax.set_ylabel("Time (Snapshots)")
         
+        # Filter for dimerization events specifically
         if not self.simulation_reaction_history_df.is_empty():
-            pair_events = self.simulation_reaction_history_df.filter(
-                pl.col("reaction_type") == "pair"
+            dimer_events = self.simulation_reaction_history_df.filter(
+                pl.col("reaction_type") == "dimerise" # Matches new reaction name
             )
             
             times_array = np.array(self.times)
-            
-            for row in pair_events.iter_rows(named=True):
-                t = row["time"]
-                s1 = row["site_target"]
-                s2 = row["site_paired_with"]
-                
+            for row in dimer_events.iter_rows(named=True):
+                t, s1, s2 = row["time"], row["site_target"], row["site_paired_with"]
                 y_idx = np.searchsorted(times_array, t)
+                # Draw bridge line between dimerized sites
                 ax.plot([s1 + 0.5, s2 + 0.5], [y_idx + 0.5, y_idx + 0.5], 
-                        color="#2c3e50", linewidth=1.5, alpha=0.8, zorder=5)
-                ax.scatter([s1 + 0.5, s2 + 0.5], [y_idx + 0.5, y_idx + 0.5], 
-                           color="#2c3e50", s=15, zorder=6)
+                        color="black", linewidth=2.0, alpha=0.9, zorder=10)
 
         legend_elements = [
-            Patch(facecolor="#e2e8f0", label="Unbound"), 
-            Patch(facecolor="#3b82f6", label="Sox2 Bound"), 
-            Patch(facecolor="#e67e22", label="NANOG Bound"),
-            plt.Line2D([0], [0], color="#2c3e50", lw=1.5, marker='o', markersize=5, label="Pairing Event")
+            Patch(facecolor="#3b82f6", label="Sox2"), 
+            Patch(facecolor="#e67e22", label="Nanog"),
+            plt.Line2D([0], [0], color="black", lw=2, label="Dimer Bridge")
         ]
-        
-        ax.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1.30, 1))
-        
-        plt.tight_layout()
-        plt.savefig(filename, dpi=300)
-        plt.close()
-    
+        ax.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1.25, 1))
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close()   
+         
     def plot_trajectory_and_noise(self, burn_in_fraction: float = 0.2) -> dict:
         """Plots key variables over time from the initialised trajectory, and calculates the Fano factor and CV of the mRNA count.
         
@@ -162,67 +154,37 @@ class ModelPlot:
         if not self.bulk_states:
             print("No trajectory data found. Ensure the model has been run before plotting.")
             return {"fano": 0.0, "cv": 0.0, "mean_mrna": 0.0}
-        times_array = np.array(self.times)
-        sox2_free = np.array([state[0] for state in self.bulk_states])
-        nanog_free = np.array([state[1] for state in self.bulk_states])
-        sox2_bound = np.array([state[2] for state in self.bulk_states])
-        nanog_bound = np.array([state[3] for state in self.bulk_states])
-        mrna = np.array([state[4] for state in self.bulk_states])        
-        # Kept for the subplot, but no longer used for stats
-        k_prod_m = self.sox2_simulation_variables.get("k_prod_m", 0.0)
-        production_rate = sox2_bound * k_prod_m
+        m = self.state_map
+        times = np.array(self.times)
+        sox2_free = np.array([s[m['sox2_free']] for s in self.bulk_states])
+        nanog_free = np.array([s[m['nanog_free']] for s in self.bulk_states])
+        mrna = np.array([s[m['mrna']] for s in self.bulk_states])        
         
-        # Isolate the steady-state portion of the mRNA array
-        burn_in_idx = int(len(times_array) * burn_in_fraction)
-        steady_state_mrna = mrna[burn_in_idx:]
         
-        if len(steady_state_mrna) == 0:
-            return {"fano": 0.0, "cv": 0.0, "mean_mrna": 0.0}
-            
-        # Calculate statistics based purely on mRNA counts
-        mean_mrna = np.mean(steady_state_mrna)
-        var_mrna = np.var(steady_state_mrna)
-        
-        fano = var_mrna / mean_mrna if mean_mrna > 0 else 0.0
-        cv = np.sqrt(var_mrna) / mean_mrna if mean_mrna > 0 else 0.0
-        
-        # Plotting
+        total_bound = np.array([
+            s[m['sox2_bound']] + s[m['nanog_bound']] + 
+            s[m['nanog_sox2_dimer_bound']] + (2 * s[m['nanog_nanog_dimer_bound']])
+            for s in self.bulk_states
+        ])
+
         fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
-        fig.suptitle(
-            f'Trajectory Dynamics\nmRNA Noise - Fano: {fano:.3f} | CV: {cv:.3f}', 
-            fontsize=14, y=0.95
-        )
+        axes[0].step(times, mrna, color='#9b59b6', label="mRNA")
+        axes[1].step(times, sox2_free, color='#3498db', label="Free Sox2")
+        axes[1].step(times, nanog_free, color='#2ecc71', label="Free Nanog")
+        axes[2].step(times, total_bound, color='#e67e22', label="Total Bound TFs")
         
-        # mRNA
-        axes[0].step(times_array, mrna, where='post', color='#9b59b6', linewidth=1.5)
-        axes[0].set_ylabel('mRNA Count')
-        axes[0].grid(True, alpha=0.3)
+        # Add specific plot for Dimer counts
+        ns_dimers = np.array([s[m['nanog_sox2_dimer_bound']] for s in self.bulk_states])
+        nn_dimers = np.array([s[m['nanog_nanog_dimer_bound']] for s in self.bulk_states])
+        axes[3].stackplot(times, ns_dimers, nn_dimers, labels=['Sox2-Nanog Dimer', 'Nanog-Nanog Dimer'], colors=['#f1c40f', '#e74c3c'])
         
-        # Free SOX2
-        axes[1].step(times_array, sox2_free, where='post', color='#3498db', linewidth=1.5)
-        axes[1].set_ylabel('Free SOX2')
-        axes[1].grid(True, alpha=0.3)
-        
-        # Bound SOX2
-        axes[2].step(times_array, sox2_bound, where='post', color='#e67e22', linewidth=1.5)
-        axes[2].set_ylabel('Bound SOX2')
-        axes[2].grid(True, alpha=0.3)
-        
-        # mRNA Production Rate
-        axes[3].step(times_array, production_rate, where='post', color='#e74c3c', linewidth=1.5)
-        axes[3].set_ylabel('Prod. Rate\n(mRNA / time)')
-        axes[3].set_xlabel('Time (Simulation Steps)')
-        axes[3].grid(True, alpha=0.3)
-        
-        # Cleanup spines
         for ax in axes:
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
+            ax.legend(loc='upper right')
+            ax.grid(True, alpha=0.2)
             
         plt.tight_layout()
         plt.show()
-        
-        return {"fano": fano, "cv": cv, "mean_mrna": mean_mrna}    
+
 def run_1d_simulation_slice(args):
     """Runs a single stochastic simulation to extract mean AND standard deviation."""
     S, N, K1 = args
