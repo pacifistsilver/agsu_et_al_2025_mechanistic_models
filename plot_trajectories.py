@@ -114,7 +114,7 @@ class ModelPlot:
         
     def save_reaction_history_log(self, filename: str = "reaction_history.csv"):
         # Cast and save without permanently mutating the instance's dataframe
-        df_out = self.simulation_reaction_history_df.cast({"site_target": pl.Int64, "site_paired_with": pl.Int64})
+        df_out = self.simulation_reaction_history_df.cast({"primary_site": pl.Int64, "secondary_site": pl.Int64})
         df_out.write_csv(filename)
     
     # plot trajectories
@@ -133,12 +133,12 @@ class ModelPlot:
         if not self.simulation_reaction_history_df.is_empty():
             dimer_events = self.simulation_reaction_history_df.filter(
                 (pl.col("reaction_type") == "k_dimerise") | 
-                (pl.col("reaction_type").is_in(["bind_s", "bind_n"]) & (pl.col("site_paired_with") != -1))
+                (pl.col("reaction_type").is_in(["bind_s", "bind_n"]) & (pl.col("secondary_site") != -1))
             )
             
             times_array = np.array(self.times)
             for row in dimer_events.iter_rows(named=True):
-                t, s1, s2 = row["time"], row["site_target"], row["site_paired_with"]
+                t, s1, s2 = row["time"], row["primary_site"], row["secondary_site"]
                 y_idx = np.searchsorted(times_array, t)
                 ax.plot([s1 + 0.5, s2 + 0.5], [y_idx + 0.5, y_idx + 0.5], 
                         color="black", linewidth=2.0, alpha=0.9, zorder=10)
