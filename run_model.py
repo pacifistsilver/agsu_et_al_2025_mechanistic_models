@@ -35,10 +35,12 @@ model = ModelCall(
 
 model_output = model.run_trajectory()
 model_plot = ModelPlot(model=model)
-model_plot.plot_trajectory_and_noise()
-model_plot.plot_site_occupancy_history()
+#model_plot.plot_trajectory_and_noise()
+#model_plot.plot_site_occupancy_history()
 model_plot.save_reaction_history_log()
 dwell_times = model_plot.get_average_dwell_times_by_species()
 print(dwell_times)
 for species, avg_time in dwell_times.items():
     print(f"{species}: {avg_time:.2f} seconds")
+
+print(model_output)

@@ -14,7 +14,6 @@ import math
 import os
 import itertools
 import concurrent.futures
-
 import numpy as np
 import pandas as pd
 import polars as pl
@@ -141,7 +140,9 @@ class PartitionFunction:
 
 
 class ModelCall:
-    """Stochastic simulation of a single trajectory. 
+    """Handle a single model simulation for a given set of parameters/variables. 
+    
+    Returns dataframes detailing reaction history and dwell times for a single simulation.
     
     Attributes:
         sox2_model_parameters (dict): Trajectory parameters (e.g., initial states for sox2_free, nanog_free, sox2_bound, nanog_bound, mrna_count).
@@ -161,35 +162,31 @@ class ModelCall:
         self.chromatin_lattice = np.zeros(self.n_binding_sites, dtype=np.int8)
 
     def _initialise_state(self):
-        """Initialise simulation variables, parameters, and chromatin states."""
+        """Initialise simulation variables, parameters, and chromatin array.
+        
+        Function responsible for building:
+            parameter_states array which tracks species count status through simulation.
+            self.t which stores curent simulation time.
+            a kernel matrix dist_matrix to weight dimerisation distances. 
+            a stoichiometry matrix dynamically based on state_names and reaction_names.
+        Also tracks chromatin array status all with with length N of self.n_binding_sites via:
+            site_is_vacant array that tracks the bound/unbound state of an array.
+            unpaired_monomer_mask that tracks the dimerised/monomer state of all bound molecules.
+            dimer_partner_map that builds a matrix containing all potential dimerisable site.s
+            tethered_partner which builds a matrix sotring all potential tetherable sites.
+            
+        Also initiates arrays:
+            self.times, self.bulk_states, self.spatial_states, self.reaction_history, self.residence_time_states
+            (sim time), (molecule counts), (chromatin states), (history of all reactions), (dwell time for a molecule at a site)
+        """
+        # build count tracking array parameter_states from state_names
         self.state_names = [
             "sox2_monomer_free", "nanog_monomer_free", "sox2_monomer_bound", "nanog_monomer_bound",
             "nanog_sox2_dimer_bound", "nanog_nanog_dimer_bound",
             "nanog_sox2_dimer_free", "nanog_nanog_dimer_free", 
             "nanog_sox2_dimer_single_bound", "nanog_nanog_dimer_single_bound", "mrna"
         ]
-        self.state_map = {name: i for i, name in enumerate(self.state_names)}
-        self.parameter_states = np.zeros(len(self.state_names), dtype=np.int32)
-        for name, idx in self.state_map.items():
-            self.parameter_states[idx] = self.sox2_model_parameters.get(name, 0)
-        self.t = 0.0
-        self.next_record_time = 0.0
         
-        self.site_is_vacant = np.ones(self.n_binding_sites, dtype=bool)
-        self.unpaired_monomer_mask = np.zeros(self.n_binding_sites, dtype=bool)
-        self.dimer_partner_map = np.full(self.n_binding_sites, -1, dtype=np.int32)
-        self.promoter_site = int((len(self.chromatin_lattice) - 1)/2)
-        self.tethered_partner = np.full(self.n_binding_sites, -1, dtype=np.int32)
-        
-        
-        # Kernel Matrix for pairing distances
-        chromatin_indices = np.arange(self.n_binding_sites)
-        dist_matrix = np.abs(chromatin_indices[:, None] - chromatin_indices[None, :]) 
-        self.kernel_matrix = np.exp(-dist_matrix / 1)
-        np.fill_diagonal(self.kernel_matrix, 0.0)
-        self.current_pair_weights = np.zeros_like(self.kernel_matrix)
-
-
         self.reaction_names = {
             0: "prod_s", 1: "prod_n", 2: "bind_s", 3: "bind_n", 
             4: "deg_s", 5: "deg_n", 6: "unbind_s", 7: "unbind_n",
@@ -197,7 +194,29 @@ class ModelCall:
             12: "tether_bind"
         }
 
-        # build stoichiometry matrix
+        self.state_map = {name: i for i, name in enumerate(self.state_names)}
+        self.parameter_states = np.zeros(len(self.state_names), dtype=np.int32)
+        for name, idx in self.state_map.items():
+            self.parameter_states[idx] = self.sox2_model_parameters.get(name, 0)
+        self.t = 0.0
+        self.next_record_time = 0.0
+        
+        self.promoter_site = int((len(self.chromatin_lattice) - 1)/2)
+        
+        # track chromatin bound status, dimer status, tethered status.
+        self.site_is_vacant = np.ones(self.n_binding_sites, dtype=bool)
+        self.unpaired_monomer_mask = np.zeros(self.n_binding_sites, dtype=bool)
+        self.dimer_partner_map = np.full(self.n_binding_sites, -1, dtype=np.int32)
+        self.tethered_partner = np.full(self.n_binding_sites, -1, dtype=np.int32)ß
+        
+        # define kernel matrix to weight dimerisation distances.
+        chromatin_indices = np.arange(self.n_binding_sites)
+        dist_matrix = np.abs(chromatin_indices[:, None] - chromatin_indices[None, :]) 
+        self.kernel_matrix = np.exp(-dist_matrix / 1)
+        np.fill_diagonal(self.kernel_matrix, 0.0)
+        self.current_pair_weights = np.zeros_like(self.kernel_matrix)
+
+        # dynamically build stoichiometry matrix dependent on state_names, reaction_names variables.
         self.stoichiometry_matrix = np.zeros((len(self.state_names), len(self.reaction_names)), dtype=np.int32)
         m = self.state_map
         self.stoichiometry_matrix[m["sox2_monomer_free"], 0] = 1   # prod_s
@@ -206,12 +225,18 @@ class ModelCall:
         self.stoichiometry_matrix[m["nanog_monomer_free"], 5] = -1 # deg_n
         self.stoichiometry_matrix[m["mrna"], 8] = 1                # prod_m
         self.stoichiometry_matrix[m["mrna"], 9] = -1               # deg_m
-    
+
         self.times, self.bulk_states, self.spatial_states, self.reaction_history, self.residence_time_states = [], [], [], [], []
         self.site_bind_times = np.full(self.n_binding_sites, -1.0)
 
     def _calculate_propensities(self):
-        """Update and return new propensities."""
+        """Update and return new propensities and molecule counts
+        
+        Returns:
+            propensities: np array describing propensity of all reactions which can occur during the simulation. 
+            sum of the propensities. 
+        
+        """
         v = self.sox2_model_variables
         m = self.state_map
         
@@ -243,13 +268,14 @@ class ModelCall:
         self.current_pair_weights = self.kernel_matrix * valid_pair_matrix
         total_pair_weight = np.sum(self.current_pair_weights)
         
+        # tether logic
         tether_mask = (self.tethered_partner != -1)
         tether_valid_matrix = tether_mask[:, None] & self.site_is_vacant[None, :]
         self.current_tether_weights = self.kernel_matrix * tether_valid_matrix
         print(tether_mask)
         total_tether_weight = np.sum(self.current_tether_weights)
         
-        
+        # bulk dimerisation logic
         bulk_nn_pairs = nanog_monomer_free * (nanog_monomer_free - 1) / 2.0
         bulk_sn_pairs = sox2_monomer_free * nanog_monomer_free
         total_bulk_pairs = bulk_nn_pairs + bulk_sn_pairs
@@ -279,9 +305,29 @@ class ModelCall:
                 v.get('k_tether_bind', v.get('k_dimerise', 0.0)) * total_tether_weight,                  # 12: tether_bind
         ])
         return propensities, np.sum(propensities)
-
+    
     def _execute_spatial_reaction(self, reaction_index):
-        """Track updates to the chromatin lattice array in case of binding/sliding."""
+        """Reaction handler for a given reaction determined during run_trajectory call.
+        
+        The reactions this handles are:
+            1. Production of SOX2
+            2. Production of NANOG
+            3. Binding of SOX2 (handles both binding of dimers and monomers)
+            4. Binding of NANOG (handles both binding of dimers and monomers)
+            5. Degradation of SOX2
+            6. Degradation of NANOG
+            7. Unbinding of SOX2 (handles unbinding of dimers and monomers)
+            8. Unbinding of NANOG (handles unbinding of dimers and monomers)
+            9. Production of mRNA (ON/OFF depending on promoter status)
+            10. Degradation of mRNA (proportional to mrNA count)
+            11. Dimerisation of site-bound monomers
+            12. Dimerisation of bulk monomers
+            13. Binding of a dimerised molecule to one site.
+        
+        Args:
+            reaction_index (int): index value referring to the numpy array propensities. 
+        
+        """
         primary_site, secondary_site = -1, -1
         m = self.state_map
         
@@ -498,7 +544,29 @@ class ModelCall:
         self.spatial_states.append(self.chromatin_lattice.copy())
 
     def _generate_dataframes(self):
-        """Setup model output dataframes."""
+        """Setup trajectory output dataframes.
+        
+        Returns:
+            sim_variable_states_df: Polars dataframe containing species counts columns (e.g. sox2_monomer_free, nanog_monomer_free, mrna) with column time.
+                {
+                    sox2_monomer_free (i32): [1, 0, ... ]
+                    (...) <- all tracked species in simulation. see variable self.state_names to see all these variables. 
+                    time (f64): [0.0, 1.0, ... ]
+                }
+            sim_site_dwell_times_df: Polars dataframe containing binding duration for all bound molecules during the run_trajectory call. 
+                {
+                    dwell_site (i64): [1, 2, 3, ... ]
+                    dwell_time (f64): [14, 21, 2, ... ]
+                    species (str): [NANOG, SOX2, NANOG:NANOG, ... ]
+                }
+            sim_reaction_history_df: Polars dataframe detailing all reactions that occurred during the run_trajectory call.
+                {
+                    time (f64): [0.0, 1.0, 2.0, ... ]
+                    reaction_type (str): [bulk_dimerise, bind_s, unbind_s, ... ]
+                    primary_site (i64): [-1, 1, 5, ... ]
+                    secondary_site (i64): [ -1, 2, 4, ... ]
+                }
+        """
         # edge case: calculate residence time at the end of the simulation for existing bound
         for i in range(self.n_binding_sites):
                         if not self.site_is_vacant[i] and self.site_bind_times[i] != -1.0:
@@ -542,7 +610,17 @@ class ModelCall:
         return self.sim_variable_states_df, self.sim_site_dwell_times_df, self.sim_reaction_history_df
 
     def run_trajectory(self):
-        """Run the Gillespie simulation."""
+        """Run the Gillespie simulation.
+        
+        Quick overview of Gillespie algorithm:
+        1. Initialise the system.
+        2. Monte Carlo -> randomly simulate time to next event given an event has occurred randomly select which event has occured.
+        3. Update - based on step 2, move model time forward to the event time and update state of the system.
+        4. Repeat steps 2 to 3 till some stopping criteria is achieved.
+        
+        Returns:
+            self._generate_dataframes(): self.sim_variable_states_df, self.sim_site_dwell_times_df, self.sim_reaction_history_df
+        """
         self._initialise_state()
 
         while self.t < self.t_max:
