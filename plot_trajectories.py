@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from concurrent.futures import ProcessPoolExecutor
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
-from main import PartitionFunction, ModelCall
+from main import ModelCall
 
 class ModelPlot:
     """Retrieve model outputs and partition function outputs and handle plotting of said data.
@@ -37,45 +37,6 @@ class ModelPlot:
         self.dimer_partner_states = model.dimer_partner_states
         self.tethered_states = model.tethered_states
         
-    # Retrieve model data
-    @staticmethod
-    def generate_thermodynamic_expectation_rho(S_vals, N_vals, K1_vals, c=1.0, alpha=1.0):
-        """Retrieve expected transcription rate from partition function given parameters.
-        
-        Args:
-            S_vals:
-                Array of bulk TF values to iterate over.
-            N_vals:
-                Array of total binding sites in chromatin.
-            K1_vals:
-                Array of binding affinities K1.
-            c:
-                Dimensionless binding weight represented as a float variable.
-            alpha:
-                Float variable representing transcription rate.
-        
-        Returns
-            Dataframe instance. 
-            For example:
-            {
-                "S": 1,
-                "N": 1,
-                "K": 1,
-                "thermo_maxmial_rate": 1.0,
-                ...
-            }
-        Raises:
-            None
-        """
-        results = []
-        for S, N, K1 in itertools.product(S_vals, N_vals, K1_vals):
-            rate_maximal = PartitionFunction.return_maximal_rho(int(N), K1, S, c, alpha)
-            rate_linear = PartitionFunction.return_nonmaximal_rho(int(N), K1, S, c, alpha, mode="linear")
-            rate_saturating = PartitionFunction.return_nonmaximal_rho(int(N), K1, S, c, alpha,K_alpha=1, mode="saturating")
-            results.append({"S": S, "N": int(N), "K1": K1, "thermo_maximal_rate": rate_maximal, "thermo_linear_rate": rate_linear, "thermo_saturating_rate": rate_saturating})
-            
-        return pd.DataFrame(results)
-
     # rewrite to take into account we are only looking at one promoter
     def get_effective_transcription_rate(self) -> float:
         if not self.bulk_states:
