@@ -380,7 +380,53 @@ class ModelCall:
 
                 primary_site, secondary_site = tethered_site, target_vacant_site
                 self.reaction_history.append((self.t, self.reaction_names[reaction_index], primary_site, secondary_site))
+
+        elif reaction_index == 13:  # site_dedimerise
+            # Find all existing pairs to choose one to break
+            paired_indices = np.where(self.dimer_partner_map != -1)[0]
+            if len(paired_indices) > 0:
+                dissociating_site = np.random.choice(paired_indices)
+                partner_site = self.dimer_partner_map[dissociating_site]
                 
+                # Update map & masks to reflect separated monomers
+                self.dimer_partner_map[dissociating_site] = -1
+                self.dimer_partner_map[partner_site] = -1
+                self.unpaired_monomer_mask[dissociating_site] = True
+                self.unpaired_monomer_mask[partner_site] = True
+                
+                tf1_type = self.chromatin_lattice[dissociating_site]
+                tf2_type = self.chromatin_lattice[partner_site]
+                
+                if (tf1_type == 1 and tf2_type == 2) or (tf1_type == 2 and tf2_type == 1):
+                    self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_bound']] -= 1
+                    self.molecule_counts[bulk_species_counts['sox2_monomer_bound']] += 1
+                    self.molecule_counts[bulk_species_counts['nanog_monomer_bound']] += 1
+                elif tf1_type == 2 and tf2_type == 2:
+                    self.molecule_counts[bulk_species_counts['nanog_nanog_dimer_bound']] -= 1
+                    self.molecule_counts[bulk_species_counts['nanog_monomer_bound']] += 2
+                    
+                primary_site, secondary_site = dissociating_site, partner_site
+            self.reaction_history.append((self.t, self.reaction_names[reaction_index], primary_site, secondary_site))
+
+        elif reaction_index == 14:  # bulk_dedimerise
+            ns_free = self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_free']]
+            nn_free = self.molecule_counts[bulk_species_counts['nanog_nanog_dimer_free']]
+            total_dimers = ns_free + nn_free
+            
+            if total_dimers > 0:
+                is_ns = (np.random.rand() < ns_free / total_dimers)
+                
+                if is_ns and ns_free >= 1:
+                    self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_free']] -= 1
+                    self.molecule_counts[bulk_species_counts['sox2_monomer_free']] += 1
+                    self.molecule_counts[bulk_species_counts['nanog_monomer_free']] += 1
+                elif not is_ns and nn_free >= 1:
+                    self.molecule_counts[bulk_species_counts['nanog_nanog_dimer_free']] -= 1
+                    self.molecule_counts[bulk_species_counts['nanog_monomer_free']] += 2
+            
+            self.reaction_history.append((self.t, self.reaction_names[reaction_index], -1, -1))
+
+
     def _record_snapshot(self):
         """Record the current states of the simulation."""
         self.times.append(self.t)
