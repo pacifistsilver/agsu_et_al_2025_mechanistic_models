@@ -2,14 +2,14 @@ from plot_trajectories import ModelPlot
 from main import ModelCall
 
 model_param = {
-    "sox2_monomer_free": 1, 
-    "nanog_monomer_free": 1, 
+    "sox2_monomer_free": 0, 
+    "nanog_monomer_free": 0, 
     "sox2_monomer_bound": 0, 
     "nanog_monomer_bound": 0, 
     "nanog_sox2_dimer_bound": 0, 
     "nanog_nanog_dimer_bound": 0,
-    "nanog_sox2_dimer_free": 0,
-    "nanog_nanog_dimer_free": 0,
+    "nanog_sox2_dimer_free": 1,
+    "nanog_nanog_dimer_free": 1,
     "mrna": 0
 }
 

@@ -28,12 +28,14 @@ class ModelPlot:
     def __init__(self, model):
         self.spatial_states = model.spatial_states 
         self.n_binding_sites = model.n_binding_sites
-        self.sox2_simulation_variables = model.sox2_model_variables
+        self.sox2_simulation_variables = model.initial_model_state
         self.bulk_states = model.bulk_states
         self.times = model.times
         self.dwell_time_df = model.sim_site_dwell_times_df
         self.simulation_reaction_history_df = model.sim_reaction_history_df
         self.state_map = model.state_map
+        self.dimer_partner_states = model.dimer_partner_states
+        self.tethered_states = model.tethered_states
         
     # Retrieve model data
     @staticmethod
@@ -119,39 +121,88 @@ class ModelPlot:
     
     # plot trajectories
     def plot_site_occupancy_history(self, filename: str = "nuc_history.png"):
-        sns.set_theme(style="ticks")
-        custom_cmap = ListedColormap(["#e2e8f0", "#3b82f6", "#e67e22"])
+        """
+        Plots the composite occupation history of binding sites over time.            
+        """
+        import matplotlib.collections as mcoll
         
-        fig, ax = plt.subplots(figsize=(10, 8))
-        sns.heatmap(self.spatial_states, cmap=custom_cmap, cbar=False, yticklabels=False, ax=ax)
+        n_snaps = len(self.spatial_states)
+        n_sites = self.n_binding_sites
+        
+        # 0=Vacant, 1=S_Mono, 2=N_Mono, 3=S_Tether, 4=N_Tether, 5=S_Bridge, 6=N_Bridge
+        composite_matrix = np.zeros((n_snaps, n_sites), dtype=int)
+        dimer_lines = [] 
+        
+        # build the composite state matrix and dimer links
+        for t in range(n_snaps):
+            lattice = self.spatial_states[t]
+            partners = self.dimer_partner_states[t]
+            tethers = self.tethered_states[t]
+            
+            
+            for i in range(n_sites):
+                tf_type = lattice[i]
+                if tf_type == 0:
+                    continue
+                elif tf_type == 1: # SOX2
+                    if partners[i] != -1:
+                        composite_matrix[t, i] = 5
+                        if i < partners[i]:
+                            dimer_lines.append([(i + 0.5, t + 0.5), (partners[i] + 0.5, t + 0.5)])
+                    elif tethers[i] != -1:
+                        composite_matrix[t, i] = 3
+                    else:
+                        composite_matrix[t, i] = 1
+                        
+                elif tf_type == 2: # NANOG
+                    if partners[i] != -1:
+                        composite_matrix[t, i] = 6
+                        if i < partners[i]:
+                            dimer_lines.append([(i + 0.5, t + 0.5), (partners[i] + 0.5, t + 0.5)])
+                    elif tethers[i] != -1:
+                        composite_matrix[t, i] = 4
+                    else:
+                        composite_matrix[t, i] = 2
+        print(composite_matrix)
+
+        sns.set_theme(style="ticks")
+        color_list = [
+            "#e2e8f0", # 0: Vacant (Light Grey)
+            "#93c5fd", # 1: SOX2 Monomer (Light Blue)
+            "#fdba74", # 2: NANOG Monomer (Light Orange)
+            "#3b82f6", # 3: SOX2 Tethered (Solid Blue)
+            "#f97316", # 4: NANOG Tethered (Solid Orange)
+            "#1e3a8a", # 5: SOX2 Bridged (Dark Blue)
+            "#9a3412"  # 6: NANOG Bridged (Dark Orange)
+        ]
+        custom_cmap = ListedColormap(color_list)
+        print(composite_matrix)
+        fig, ax = plt.subplots(figsize=(12, 8))
+        sns.heatmap(composite_matrix, cmap=custom_cmap, cbar=False, yticklabels=False, ax=ax)
         
         ax.set_title("TF Occupancy and Dimerization Over Time", pad=15)
         ax.set_xlabel("Nucleosome Index")
         ax.set_ylabel("Time (Snapshots)")
         
-        # Filter for dimerisation events specifically (both direct binding of dimer and dimerisation while on site)
-        if not self.simulation_reaction_history_df.is_empty():
-            dimer_events = self.simulation_reaction_history_df.filter(
-                (pl.col("reaction_type") == "k_dimerise") | 
-                (pl.col("reaction_type").is_in(["bind_s", "bind_n"]) & (pl.col("secondary_site") != -1))
-            )
-            
-            times_array = np.array(self.times)
-            for row in dimer_events.iter_rows(named=True):
-                t, s1, s2 = row["time"], row["primary_site"], row["secondary_site"]
-                y_idx = np.searchsorted(times_array, t)
-                ax.plot([s1 + 0.5, s2 + 0.5], [y_idx + 0.5, y_idx + 0.5], 
-                        color="black", linewidth=2.0, alpha=0.9, zorder=10)
+        if dimer_lines:
+            lc = mcoll.LineCollection(dimer_lines, colors="black", linewidths=1.5, alpha=0.8, zorder=10)
+            ax.add_collection(lc)
 
+        # 4. Create Legend
         legend_elements = [
-            Patch(facecolor="#3b82f6", label="SOX2"), 
-            Patch(facecolor="#e67e22", label="NANOG"),
-            plt.Line2D([0], [0], color="black", lw=2, label="Dimer")
+            Patch(facecolor="#93c5fd", label="SOX2 Monomer"),
+            Patch(facecolor="#fdba74", label="NANOG Monomer"),
+            Patch(facecolor="#3b82f6", label="SOX2:NANOG Head"),
+            Patch(facecolor="#f97316", label="NANOG:NANOG Head"),
+            Patch(facecolor="#1e3a8a", label="SOX2 Dimerised"),
+            Patch(facecolor="#9a3412", label="NANOG Dimerised"),
+            plt.Line2D([0], [0], color="black", lw=1.5, label="Full Dimer Bridge")
         ]
-        ax.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1.25, 1))
+        ax.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1.30, 1))
+        
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close()
-            
+                    
     # todo: add binding events rather tracking how much is boudn?
     def plot_trajectory_and_noise(self, burn_in_fraction: float = 0.2) -> dict:
         """Plots key variables over time from the initialised trajectory, and calculates the Fano factor and CV of the mRNA count.
