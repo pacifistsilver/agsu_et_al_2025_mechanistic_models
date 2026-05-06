@@ -22,6 +22,16 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
 
+"""
+TODO: 
+    can probably simplify the dimerisation functions
+    so to the unbinding function
+    add in nanog-nanog/nanog-sox2 in the nanog binding case?
+    check tethering logic
+
+"""
+
+
 class ModelCall:
     """Handle a single model simulation for a given set of parameters/variables. 
     
@@ -190,6 +200,127 @@ class ModelCall:
         ])
         return propensities, np.sum(propensities)
     
+    def _handle_tf_binding_reaction(self, reaction_index):
+        """
+        Handle all binding reactions. 
+        
+        Randomly choose site of binding via primary_site. Flip site vacancy to False. Update chromatin_lattice with new TF present at index primary_site.
+        """        
+        primary_site, secondary_site = -1, -1
+        bulk_species_counts = self.state_map
+        
+        free_indices = np.where(self.site_is_vacant)[0]
+        if len(free_indices) == 0: return
+        if reaction_index == 2: 
+            tf_type = 1 
+            monomer = "sox2_monomer_free"
+            monomer_bound = "sox2_monomer_bound"
+            dimer = "nanog_sox2_dimer_free"
+            dimer_single = "nanog_sox2_dimer_single_bound"
+        else: 
+            tf_type = 2
+            monomer = "nanog_monomer_free"
+            monomer_bound = "nanog_monomer_bound"
+            dimer = "nanog_nanog_dimer_free"
+            dimer_single = "nanog_nanog_dimer_single_bound"
+
+        
+        total_tf_free = self.parameter_states[m[monomer]] + self.parameter_states[m[dimer]]
+        if total_tf_free <= 0: return
+        is_dimer = (np.random.rand() < self.parameter_states[m[dimer]]/ total_tf_free) if total_tf_free > 0 else False
+        
+        # if nanog then choose nanognanog or nanogsox2
+        # choose which dimer nanogsox2 or nanognanog in the case we are looking at nanog
+        
+        primary_site = np.random.choice(free_indices)
+        self.site_is_vacant[primary_site] = False
+        self.site_bind_times[primary_site] = self.t
+
+        # bind a dimer
+        if is_dimer:
+                self.chromatin_lattice[primary_site] = tf_type
+                self.tethered_partner[primary_site] = tf_type + 1
+                self.parameter_states[m[dimer]] -= 1
+                self.parameter_states[m[dimer_single]] += 1
+        # bind a monomer
+        else:
+            self.unpaired_monomer_mask[primary_site] = True
+            self.chromatin_lattice[primary_site] = tf_type
+            self.parameter_states[m[monomer]] -= 1
+            self.parameter_states[m[monomer_bound]] += 1
+
+        self.reaction_history.append((self.t, self.reaction_names[reaction_index], primary_site, secondary_site))
+    
+    def _handle_tf_unbinding_reaction(self, reaction_index):
+        primary_site, secondary_site = -1, -1
+        m = self.state_map
+
+        tf_type = 1 if reaction_index == 6 else 2 # TF unbinding is SOX2 if reaction 6 otherwise NANOG
+        bound_indices = np.where(self.chromatin_lattice == tf_type)[0]
+        
+        if len(bound_indices) > 0:
+            dissociating_site = np.random.choice(bound_indices)
+            duration = self.t - self.site_bind_times[dissociating_site]
+            self.site_bind_times[dissociating_site] = -1.0 
+                            
+            # calculate residence time
+            if self.dimer_partner_map[dissociating_site] != -1:
+                paired_site_type = self.chromatin_lattice[self.dimer_partner_map[dissociating_site]]
+                if (tf_type == 1 and paired_site_type == 2) or (tf_type == 2 and paired_site_type == 1):
+                    species_label = "SOX2:NANOG"
+                else:
+                    species_label = "NANOG:NANOG"
+            else:
+                species_label = "SOX2" if tf_type == 1 else "NANOG"
+
+            self.residence_time_states.append([dissociating_site, duration, species_label])                
+            
+            self.site_bind_times[dissociating_site] = -1.0 
+            self.site_is_vacant[dissociating_site] = True
+            self.chromatin_lattice[dissociating_site] = 0                
+            # site was a dimer bound to two sites
+            if self.dimer_partner_map[dissociating_site] != -1:
+                paired_site = self.dimer_partner_map[dissociating_site]
+                paired_site_tf_type = self.chromatin_lattice[paired_site]
+                
+                # remove pair
+                self.dimer_partner_map[dissociating_site] = -1
+                self.dimer_partner_map[paired_site_tf_type] = -1
+
+                self.tethered_partner[paired_site] = paired_site_tf_type
+
+                if (tf_type == 1 and paired_site_tf_type == 2) or (tf_type == 2 and paired_site_tf_type == 1):
+                    self.parameter_states[m['nanog_sox2_dimer_bound']] -= 1
+                    self.parameter_states[m['nanog_sox2_dimer_single_bound']] += 1
+                elif tf_type == 2 and paired_site_tf_type == 2:
+                    self.parameter_states[m['nanog_nanog_dimer_bound']] -= 1
+                    self.parameter_states[m['nanog_nanog_dimer_single_bound']] += 1
+            # site was a single bound dimer
+            elif self.tethered_partner[dissociating_site] != -1:
+                tether_tf_type = self.tethered_partner[dissociating_site]
+                self.tethered_partner[dissociating_site] = -1
+                
+                if (tf_type == 1 and tether_tf_type == 2) or (tf_type == 2 and tether_tf_type == 1):
+                    self.parameter_states[m['nanog_sox2_dimer_single_bound']] -= 1
+                    self.parameter_states[m['nanog_sox2_dimer_free']] += 1
+                elif tf_type == 2 and tether_tf_type == 2:
+                    self.parameter_states[m['nanog_nanog_dimer_single_bound']] -= 1
+                    self.parameter_states[m['nanog_nanog_dimer_free']] += 1
+
+            # site found was a monomer  / individually bound dimer
+            else:
+                self.unpaired_monomer_mask[dissociating_site] = False
+                if tf_type == 1:
+                    self.parameter_states[m['sox2_monomer_bound']] -= 1
+                    self.parameter_states[m['sox2_monomer_free']] += 1
+                else:
+                    self.parameter_states[m['nanog_monomer_bound']] -= 1
+                    self.parameter_states[m['nanog_monomer_free']] += 1
+                    
+            primary_site = dissociating_site
+            self.reaction_history.append((self.t, self.reaction_names[reaction_index], primary_site, secondary_site))      
+
+    
     def _execute_spatial_reaction(self, reaction_index):
         """Reaction handler for a given reaction determined during run_trajectory call.
         
@@ -213,137 +344,20 @@ class ModelCall:
         
         """
         primary_site, secondary_site = -1, -1
-        bulk_species_counts = self.state_map
+        m = self.state_map
         
-        # bind any sox2 from bulk
-        if reaction_index == 2:
-            free_indices = np.where(self.site_is_vacant)[0]
-            if len(free_indices) == 0: return
-            tf_type = 1
-            
-            total_tf_free = self.molecule_counts[bulk_species_counts['sox2_monomer_free']] + self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_free']]
-            if total_tf_free <= 0: return
-            # this is a bit wack lowkey
-            is_dimer = (np.random.rand() < self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_free']] / total_tf_free) if total_tf_free > 0 else False
-            
-            primary_site = np.random.choice(free_indices)
-            self.site_is_vacant[primary_site] = False
-            self.site_bind_times[primary_site] = self.t
-
-            # bind a tethered molecule
-            if is_dimer:
-                    self.chromatin_lattice[primary_site] = 1
-                    self.dangling_tf_map[primary_site] = 2 
-                    self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_free']] -= 1
-                    self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_single_bound']] += 1
-            # bind a plain monomer
-            else:
-                self.unpaired_monomer_mask[primary_site] = True
-                self.chromatin_lattice[primary_site] = tf_type
-                self.molecule_counts[bulk_species_counts['sox2_monomer_free']] -= 1
-                self.molecule_counts[bulk_species_counts['sox2_monomer_bound']] += 1
-
-            self.reaction_history.append((self.t, self.reaction_names[reaction_index], primary_site, secondary_site))
+        # bind any tf
+        if reaction_index in [2, 3]: self._handle_tf_binding_reaction(reaction_index)
         
-        # bind any nanog
-        if reaction_index == 3:
-            free_indices = np.where(self.site_is_vacant)[0]
-            if len(free_indices) == 0: return
-            tf_type = 2
+        # unbinding
+        elif reaction_index in [6, 7]: self._handle_tf_unbinding_reaction(reaction_index)
             
-            total_tf_free = self.molecule_counts[bulk_species_counts['nanog_monomer_free']] + self.molecule_counts[bulk_species_counts['nanog_nanog_dimer_free']]
-            if total_tf_free <= 0: return
-            is_dimer = (np.random.rand() < self.molecule_counts[bulk_species_counts['nanog_nanog_dimer_free']] / total_tf_free) if total_tf_free > 0 else False
+        # mRNA production/degradation
+        elif reaction_index in [8, 9]: 
+            if reaction_index == 8: self.parameter_states[m['mRNA']] += 1
+            else: self.parameter_states[m['mRNA']] -= 1
             
-            primary_site = np.random.choice(free_indices)
-            self.site_is_vacant[primary_site] = False
-            self.site_bind_times[primary_site] = self.t
-
-            # bind dimer
-            if is_dimer:
-                    self.chromatin_lattice[primary_site] = 2
-                    self.dangling_tf_map[primary_site] = 2
-                    self.molecule_counts[bulk_species_counts['nanog_nanog_dimer_free']] -= 1
-                    self.molecule_counts[bulk_species_counts['nanog_nanog_dimer_single_bound']] += 1
-            # bind monomer
-            else: 
-                self.unpaired_monomer_mask[primary_site] = True
-                self.chromatin_lattice[primary_site] = tf_type
-                self.molecule_counts[bulk_species_counts['nanog_monomer_free']] -= 1
-                self.molecule_counts[bulk_species_counts['nanog_monomer_bound']] += 1
-
-            self.reaction_history.append((self.t, self.reaction_names[reaction_index], primary_site, secondary_site))
-        
-        elif reaction_index in [6, 7]:  # unbind reaction
-            tf_type = 1 if reaction_index == 6 else 2 # TF unbinding is SOX2 if reaction 6 otherwise NANOG
-            bound_indices = np.where(self.chromatin_lattice == tf_type)[0]
-            
-            if len(bound_indices) > 0:
-                dissociating_site = np.random.choice(bound_indices)
-                duration = self.t - self.site_bind_times[dissociating_site]
-                self.site_bind_times[dissociating_site] = -1.0 
-                                
-                # calculate residence time
-                if self.dimer_partner_map[dissociating_site] != -1:
-                    paired_site_type = self.chromatin_lattice[self.dimer_partner_map[dissociating_site]]
-                    if (tf_type == 1 and paired_site_type == 2) or (tf_type == 2 and paired_site_type == 1):
-                        species_label = "SOX2:NANOG"
-                    else:
-                        species_label = "NANOG:NANOG"
-                else:
-                    species_label = "SOX2" if tf_type == 1 else "NANOG"
-
-                self.residence_time_states.append([dissociating_site, duration, species_label])                
-                
-                self.site_bind_times[dissociating_site] = -1.0 
-                self.site_is_vacant[dissociating_site] = True
-                self.chromatin_lattice[dissociating_site] = 0                
-                # site was a dimer bound to two sites
-                if self.dimer_partner_map[dissociating_site] != -1:
-                    paired_site = self.dimer_partner_map[dissociating_site]
-                    paired_site_tf_type = self.chromatin_lattice[paired_site]
-                    
-                    # remove pair
-                    self.dimer_partner_map[dissociating_site] = -1
-                    self.dimer_partner_map[paired_site] = -1
-                    # update tether map
-                    self.dangling_tf_map[paired_site] = self.chromatin_lattice[dissociating_site]
-
-                    if (tf_type == 1 and paired_site_tf_type == 2) or (tf_type == 2 and paired_site_tf_type == 1):
-                        self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_bound']] -= 1
-                        self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_single_bound']] += 1
-                    elif tf_type == 2 and paired_site_tf_type == 2:
-                        self.molecule_counts[bulk_species_counts['nanog_nanog_dimer_bound']] -= 1
-                        self.molecule_counts[bulk_species_counts['nanog_nanog_dimer_single_bound']] += 1
-                # site was a single bound dimer
-                elif self.dangling_tf_map[dissociating_site] != -1:
-                    tether_tf_type = self.dangling_tf_map[dissociating_site]
-                    self.dangling_tf_map[dissociating_site] = -1
-                    
-                    if (tf_type == 1 and tether_tf_type == 2) or (tf_type == 2 and tether_tf_type == 1):
-                        self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_single_bound']] -= 1
-                        self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_free']] += 1
-                    elif tf_type == 2 and tether_tf_type == 2:
-                        self.molecule_counts[bulk_species_counts['nanog_nanog_dimer_single_bound']] -= 1
-                        self.molecule_counts[bulk_species_counts['nanog_nanog_dimer_free']] += 1
-
-                # site found was a monomer  / individually bound dimer
-                else:
-                    self.unpaired_monomer_mask[dissociating_site] = False
-                    if tf_type == 1:
-                        self.molecule_counts[bulk_species_counts['sox2_monomer_bound']] -= 1
-                        self.molecule_counts[bulk_species_counts['sox2_monomer_free']] += 1
-                    else:
-                        self.molecule_counts[bulk_species_counts['nanog_monomer_bound']] -= 1
-                        self.molecule_counts[bulk_species_counts['nanog_monomer_free']] += 1
-                        
-                primary_site = dissociating_site
-                self.reaction_history.append((self.t, self.reaction_names[reaction_index], primary_site, secondary_site))      
-                 
-        elif reaction_index in [8, 9]: # mrna production degradation events
-            if self.track_history:
-                self.reaction_history.append((self.t, self.reaction_names[reaction_index], -1, -1))
-            return
+            self.reaction_history.append((self.t, self.reaction_names[reaction_index], -1, -1))
         
         elif reaction_index == 10:  # site-site dimerisation
             total_w = np.sum(self.current_pair_weights)        
