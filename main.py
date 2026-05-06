@@ -121,8 +121,8 @@ class ModelCall:
             sum of the propensities. 
         
         """
-        v = self.sox2_model_variables
-        m = self.state_map
+        bulk_species_counts = self.initial_model_state
+        rate_constants = self.state_map
         
         sox2_monomer_free = self.molecule_counts[bulk_species_counts['sox2_monomer_free']]
         nanog_monomer_free = self.molecule_counts[bulk_species_counts['nanog_monomer_free']]
