@@ -23,123 +23,6 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
 
-class PartitionFunction: 
-    """Calculate Rho (expected transcription rate) from the partition function.
-    
-    The full partition function is defined as: 
-    \begin{equation} \mathcal Z_2 = \sum_{\ell=0}^{\min(n,N-n)} {N-n \choose \ell}{n\choose \ell}\ell!\, c^\ell
-    \end{equation}
-    where N is the number of identical SOX2 binding sites, n the number of individually bound TF,
-    K1 the intrinsic affinity for these sites, S the amount of free bulk TF.
-    In addition, there is a dimensionless binding factor c, and the number of paired contacts l. 
-    
-    Rho can be obtained in three ways:
-        (1) alpha * (1 - (zed**-1))
-        (2) alpha * n
-        (3) (alpha * K_alpha * n) / (K_alpha * n + 1)
-    where alpha is the rate of transcription, n is the number of bound sites, 
-    K_alpha is the constant which sets the rate at which alpha saturates for large n (where K_alpha^-1 << n),
-    and zed the sum of the partition function.
-    """   
-    
-    def calculate_Zn(n: int, N: int, K1: float, S: float, c: float) -> float:
-        """Calculate partition function for a single n.
-        
-        Args:
-            n: Number of bound sites.
-            N: Total sites.
-            K1: Intrinsic affinity for sites.
-            S: Bulk TF.
-            c: Dimensionless binding factor.
-        
-        Returns:
-            A float sum of the first and second summation of the partition function.
-        """
-        binding_term = math.comb(N, n) * ((K1 * S)**n) # first summation
-        
-        pairing_sum = sum(
-            math.comb(N - n, l) * math.comb(n, l) * math.factorial(l) * (c**l)
-            for l in range(min(n, N - n) + 1)
-        ) # second summation
-        return binding_term * pairing_sum
-
-    @staticmethod
-    def calculate_total_Z(N: int, K1: float, S: float, c: float) -> float:
-        """Calculate the partition function over all possible bound sites (i.e. n = 0 to N)
-        
-        Args:
-            N: Total sites.
-            K1: Intrinsic affinity for sites.
-            S: Bulk TF.
-            c: Dimensionless binding factor.
-            
-        Returns:
-            The float sum of the partition function over all n from 0 to N.
-        """
-        max_n = min(N, int(S))
-        return sum(PartitionFunction.calculate_Zn(n, N, K1, S, c) for n in range(max_n + 1)) # summation over all n -> N
-    
-    @staticmethod
-    def return_maximal_rho(N: int, K1: float, S: float, c: float, alpha: float) -> float:
-        """Calculate Rho in the case where any binding achieves maximal rate.
-
-        First method of calculating the transcription rate rho which is the case where the maximal transcription rate is achieved by the binding of a TF to DNA.
-        
-        Args:
-            N: Total sites.
-            K1: Intrinsic affinity for sites.
-            S: Bulk TF.
-            c: Dimensionless binding factor.
-            alpha: Rate of transcription.
-                    
-        Returns:
-            Float sum of the transcription rate rho.
-        """
-        zed = PartitionFunction.calculate_total_Z(N, K1, S, c)
-        return alpha * (1 - (zed**-1)) if zed else 0.0
-
-    @staticmethod
-    def return_nonmaximal_rho(N: int, K1: float, S: float, c: float, alpha: float, K_alpha: float = None, mode: str = "constant") -> float:
-        """Calculate Rho in cases where binding leads to a multiplicative effect on transcription rate.
-
-        Second and third method of calculating rho where transcription is proportional to the number of bound TF. 
-        Switch between the second and third methods by specifying mode as either "linear" or "saturating". 
-        See the method return_maximal_rho for the other method of calculating transcription rate. 
-        
-        Args:
-            N: Total sites.
-            N_bound: sites that are bound by a TF.
-            K1: Intrinsic affinity for sites.
-            S: Bulk TF.
-            c: Dimensionless binding factor.
-            alpha: Rate of transcription.
-            K_alpha: Constant which determines the rate at which saturation occurs.
-            mode: Chooses the mode of calculation ("constant", "linear", or "saturating").
-                    
-        Returns:
-            Float sum of the transcription rate rho.
-        """
-        numerator_sum = 0.0 # sum of individual zed 
-        max_n = min(N, int(S))
-        Z_total = PartitionFunction.calculate_total_Z(N, K1, S, c)
-        
-        for n in range(1, max_n + 1):
-            Zn = PartitionFunction.calculate_Zn(n, N, K1, S, c)
-            print(Zn)
-            
-            if mode == "constant":
-                alpha_n = alpha
-            elif mode == "linear": 
-                alpha_n = alpha * n
-            elif mode == "saturating" and K_alpha is not None:
-                alpha_n = (alpha * K_alpha * n) / (K_alpha * n + 1)
-            else:
-                alpha_n = 0.0
-                
-            numerator_sum += alpha_n * Zn
-        return numerator_sum / Z_total if Z_total else 0.0    
-
-
 class ModelCall:
     """Stochastic simulation of a single trajectory. 
     
@@ -263,12 +146,12 @@ class ModelCall:
         # probably when selecting bind reaction, randomly choose which species sox2, sox2-nanog to bind.
         
         propensities = np.array([
-                rate_constants.get('k_prod_s', 0.0),                               # 0
-                rate_constants.get('k_prod_n', 0.0),                               # 1
+                rate_constants.get('k_s_in', 0.0),                               # 0
+                rate_constants.get('k_n_in', 0.0),                               # 1
                 rate_constants.get('k_bind_s', 0.0) * (sox2_monomer_free + nanog_sox2_dimer_free) * unbound_sites,  # 2
                 rate_constants.get('k_bind_n', 0.0) * (nanog_monomer_free + nanog_nanog_dimer_free) * unbound_sites,  # 3
-                rate_constants.get('k_deg_s', 0.0) * sox2_monomer_free,                       # 4
-                rate_constants.get('k_deg_n', 0.0) * nanog_monomer_free,                       # 5
+                rate_constants.get('k_s_out', 0.0) * sox2_monomer_free,                       # 4
+                rate_constants.get('k_n_out', 0.0) * nanog_monomer_free,                       # 5
                 rate_constants.get('k_unbind_s', 0.0) * (sox2_monomer_bound + nanog_sox2_dimer_bound),               # 6
                 rate_constants.get('k_unbind_n', 0.0) * (nanog_monomer_bound + nanog_nanog_dimer_bound),               # 7
                 rate_constants.get('k_prod_m', 0.0) if promoter_has_sox2 else 0.0, # 8
@@ -276,7 +159,8 @@ class ModelCall:
                 rate_constants.get('k_dimerise', 0.0) * total_pair_weight,         # site dimerisation     
                 rate_constants.get('k_dimerise', 0.0) * total_bulk_pairs, # bulk dimerisation 
                 rate_constants.get('k_tether_bind', rate_constants.get('k_dimerise', 0.0)) * total_tether_weight,                  # 12: tether_bind
-                
+                rate_constants.get('k_dissociate', 0.0) * (nanog_sox2_dimer_bound + nanog_nanog_dimer_bound),                 # 13: site_dedimerise
+                rate_constants.get('k_dissociate', 0.0) * (nanog_sox2_dimer_free + nanog_nanog_dimer_free),                   # 14: bulk_dedimerise
         ])
         return propensities, np.sum(propensities)
 

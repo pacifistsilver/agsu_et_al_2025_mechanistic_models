@@ -14,13 +14,14 @@ model_param = {
 }
 
 model_var = {
-    "k_prod_s": 0.0, "k_deg_s": 0.0, 
-    "k_prod_n": 0.0, "k_deg_n": 0.0,
+    "k_s_in": 0.0, "k_s_out": 0.0, 
+    "k_n_in": 0.0, "k_in_out": 0.0,
     "k_bind_s": 1.0, "k_unbind_s": 0.06,
     "k_bind_n": 1.0, "k_unbind_n": 0.25,
     "k_dimerise": 1.0,  
     "k_prod_m": 1.0,    
     "k_deg_m": 0.53, 
+    "k_dissociate": 0.5
 }
 
 sim_max_time = 100
