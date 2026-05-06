@@ -276,6 +276,7 @@ class ModelCall:
                 rate_constants.get('k_dimerise', 0.0) * total_pair_weight,         # site dimerisation     
                 rate_constants.get('k_dimerise', 0.0) * total_bulk_pairs, # bulk dimerisation 
                 rate_constants.get('k_tether_bind', rate_constants.get('k_dimerise', 0.0)) * total_tether_weight,                  # 12: tether_bind
+                
         ])
         return propensities, np.sum(propensities)
 
