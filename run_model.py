@@ -73,7 +73,6 @@ def generate_lhs_and_run(num_samples: int, dimensions:int, optimization:str = "r
             submission = submission | perturbed_param_dict
         metadata.append(submission)
 
-    print(metadata)
     df_meta = pl.DataFrame(metadata)
     summary_results = []
     with concurrent.futures.ProcessPoolExecutor(max_workers=8) as executor:
