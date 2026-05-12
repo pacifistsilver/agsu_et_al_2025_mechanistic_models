@@ -32,13 +32,12 @@ default_model_param = {
     "k_dimerise": 0.0,  
     "k_prod_m": 1.0,    
     "k_deg_m": 0.53, 
-    "k_dissociate": 0.5
+    "k_dissociate": 0
 }
 
 def run_and_save_trajectory(run_id: int, sample_params: dict):
     """Wrapper to run the model, tag the data, and save to Parquet."""
     
-    # Initialize your model with the sampled parameters
     model = ModelCall(
         model_param=sample_params["initial_state"], 
         model_var=sample_params["rates"], 
@@ -50,10 +49,6 @@ def run_and_save_trajectory(run_id: int, sample_params: dict):
     df_states, df_dwell, df_rxns = model.run_trajectory()
     
     mrna_counts = df_states["mRNA"].to_numpy()
-    mrna_mean = mrna_counts.mean()
-    mrna_var = mrna_counts.var()
-    mrna_covariance = np.sqrt(mrna_var) / mrna_mean if mrna_mean > 0 else 0
-    mrna_fano = mrna_var / mrna_mean    
     
     df_states = df_states.with_columns(pl.lit(run_id).alias("run_id"))
     df_dwell = df_dwell.with_columns(pl.lit(run_id).alias("run_id"))
@@ -65,28 +60,17 @@ def run_and_save_trajectory(run_id: int, sample_params: dict):
     
     sox2_dwells = df_dwell.filter(pl.col("species") == "SOX2")["dwell_time"]
     nanog_dwells = df_dwell.filter(pl.col("species") == "NANOG")["dwell_time"]
-    sox2_dwell_counts = sox2_dwells.to_numpy()
-    sox2_dwell_mean = sox2_dwell_counts.mean() if len(sox2_dwells) > 0 else 0.0
-    sox2_dwell_var = sox2_dwell_counts.var()
-    sox2_dwell_covariance = np.sqrt(sox2_dwell_var) / sox2_dwell_mean if mrna_mean > 0 else 0
-    
+    sox2_dwell_counts = sox2_dwells.to_numpy()    
     nanog_dwell_counts = nanog_dwells.to_numpy()
-    nanog_dwell_mean = nanog_dwell_counts.mean() if len(sox2_dwells) > 0 else 0.0
-    nanog_dwell_var = nanog_dwell_counts.var()
-    nanog_dwell_covariance = np.sqrt(nanog_dwell_var) / nanog_dwell_mean if mrna_mean > 0 else 0
 
     
     return {
         "run_id": run_id,
-        "mrna_mean": mrna_mean,
-        "mrna_fano": mrna_fano,
-        "mrna_covariance": mrna_covariance,
-        "sox2_mean_dwell": sox2_dwell_mean,
-        "sox2_dwell_var": sox2_dwell_var,
-        "sox2_dwell_covariance": sox2_dwell_covariance,
-        "nanog_mean_dwell": nanog_dwell_mean,
-        "nanog_dwell_var": nanog_dwell_var,
-        "nanog_dwell_covariance": nanog_dwell_covariance
+        "model_var": sample_params["rates"],
+        "model_initial_state": sample_params["initial_state"],
+        "mrna_counts": mrna_counts,
+        "sox2_dwell_counts": sox2_dwell_counts,
+        "nanog_dwell_counts": nanog_dwell_counts,    
     }
 
 def generate_lhs_and_run(num_samples: int):
@@ -136,4 +120,4 @@ def generate_lhs_and_run(num_samples: int):
             print(f"Successfully saved {len(df_final)} runs to {save_path}")
         
 if __name__ == '__main__': 
-    generate_lhs_and_run(num_samples=20)
+    generate_lhs_and_run(num_samples=1)
