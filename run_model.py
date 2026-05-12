@@ -11,8 +11,8 @@ os.makedirs("output/dwell_times", exist_ok=True)
 os.makedirs("output/reactions", exist_ok=True)
 
 default_model_var = {
-    "sox2_monomer_free": 5, 
-    "nanog_monomer_free": 10, 
+    "sox2_monomer_free": 10, 
+    "nanog_monomer_free": 1, 
     "sox2_monomer_bound": 0, 
     "nanog_monomer_bound": 0, 
     "nanog_sox2_dimer_bound": 0, 
@@ -25,11 +25,11 @@ default_model_var = {
 }
 
 default_model_param = {
-    "k_s_in": 0, "k_s_out": 0, 
-    "k_n_in": 0, "k_in_out": 0,
+    "k_s_in": 0, "k_s_out": 0,
+    "k_n_in": 0, "k_in_out": 0, 
     "k_bind_s": 1.0, "k_unbind_s": 0.06,
-    "k_bind_n": 1.0, "k_unbind_n": 0.25,
-    "k_dimerise": 1.0,  
+    "k_bind_n": 1.0, "k_unbind_n": 0.24,
+    "k_dimerise": 0.0,  
     "k_prod_m": 1.0,    
     "k_deg_m": 0.53, 
     "k_dissociate": 0.5
@@ -53,7 +53,7 @@ def run_and_save_trajectory(run_id: int, sample_params: dict):
     mrna_mean = mrna_counts.mean()
     mrna_var = mrna_counts.var()
     mrna_covariance = np.sqrt(mrna_var) / mrna_mean if mrna_mean > 0 else 0
-    mrna_fano = mrna_var / mrna_mean
+    mrna_fano = mrna_var / mrna_mean    
     
     df_states = df_states.with_columns(pl.lit(run_id).alias("run_id"))
     df_dwell = df_dwell.with_columns(pl.lit(run_id).alias("run_id"))
@@ -65,34 +65,46 @@ def run_and_save_trajectory(run_id: int, sample_params: dict):
     
     sox2_dwells = df_dwell.filter(pl.col("species") == "SOX2")["dwell_time"]
     nanog_dwells = df_dwell.filter(pl.col("species") == "NANOG")["dwell_time"]
-    sox2_mean_dwell = sox2_dwells.mean() if len(sox2_dwells) > 0 else 0.0
-    nanog_mean_dwell= nanog_dwells.mean() if len(nanog_dwells) > 0 else 0.0
+    sox2_dwell_counts = sox2_dwells.to_numpy()
+    sox2_dwell_mean = sox2_dwell_counts.mean() if len(sox2_dwells) > 0 else 0.0
+    sox2_dwell_var = sox2_dwell_counts.var()
+    sox2_dwell_covariance = np.sqrt(sox2_dwell_var) / sox2_dwell_mean if mrna_mean > 0 else 0
+    
+    nanog_dwell_counts = nanog_dwells.to_numpy()
+    nanog_dwell_mean = nanog_dwell_counts.mean() if len(sox2_dwells) > 0 else 0.0
+    nanog_dwell_var = nanog_dwell_counts.var()
+    nanog_dwell_covariance = np.sqrt(nanog_dwell_var) / nanog_dwell_mean if mrna_mean > 0 else 0
+
+    
     return {
         "run_id": run_id,
         "mrna_mean": mrna_mean,
         "mrna_fano": mrna_fano,
         "mrna_covariance": mrna_covariance,
-        "sox2_mean_dwell": sox2_mean_dwell,
-        "nanog_mean_dwell": nanog_mean_dwell
+        "sox2_mean_dwell": sox2_dwell_mean,
+        "sox2_dwell_var": sox2_dwell_var,
+        "sox2_dwell_covariance": sox2_dwell_covariance,
+        "nanog_mean_dwell": nanog_dwell_mean,
+        "nanog_dwell_var": nanog_dwell_var,
+        "nanog_dwell_covariance": nanog_dwell_covariance
     }
 
 def generate_lhs_and_run(num_samples: int):
-    sampler = qmc.LatinHypercube(d=6, optimization="random-cd")
+    sampler = qmc.LatinHypercube(d=4, optimization="random-cd")
     sample = sampler.random(n=num_samples)
-    # kbinds, kunbinds, kbindn, kunbindn, k_dimerise, kdissociate,
-    l_bounds = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
-    u_bounds = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    # kbinds, kbindn, k_dimerise, kdissociate, sox2 free, nanog free
+    l_bounds = [0.1, 0.1, 0.1, 0.1]
+    u_bounds = [1.0, 1.0, 1.0, 1.0]
     sample_scaled = qmc.scale(sample, l_bounds, u_bounds)    
     metadata = []
     for i in range(num_samples):
         metadata.append({
             "run_id": i,
             "k_bind_s": sample_scaled[i][0],
-            "k_unbind_s": sample_scaled[i][1],
-            "k_bind_n": sample_scaled[i][2],
+            "k_bind_n": sample_scaled[i][1],
+            "k_unbind_s": sample_scaled[i][2],
             "k_unbind_n": sample_scaled[i][3],
-            "k_dimerise": sample_scaled[i][4],
-            "k_dissociate": sample_scaled[i][5],
+
         })
     
     pl.DataFrame(metadata).write_parquet("output/lhs_metadata.parquet")
@@ -102,15 +114,12 @@ def generate_lhs_and_run(num_samples: int):
         futures = []
         for meta in metadata:
             run_rates = default_model_param.copy() 
-            run_rates["k_bind_s"] = meta["k_bind_s"]
-            run_rates["k_unbind_s"] = meta["k_unbind_s"]
-            run_rates["k_bind_n"] = meta["k_bind_n"]
-            run_rates["k_unbind_n"] = meta["k_unbind_n"]
-            run_rates["k_dimerise"] = meta["k_dimerise"]
-            run_rates["k_dissociate"] = meta["k_dissociate"]
             model_var = default_model_var.copy()
+            run_rates["k_bind_s"] = meta["k_bind_s"]
+            run_rates["k_bind_n"] = meta["k_bind_n"]
+            run_rates["k_unbind_s"] = meta["k_unbind_s"]
+            run_rates["k_unbind_n"] = meta["k_unbind_n"]
             run_params = {"initial_state": model_var, "rates": run_rates}
-            
             futures.append(executor.submit(run_and_save_trajectory, meta["run_id"], run_params))
             
         for future in concurrent.futures.as_completed(futures):
@@ -127,4 +136,4 @@ def generate_lhs_and_run(num_samples: int):
             print(f"Successfully saved {len(df_final)} runs to {save_path}")
         
 if __name__ == '__main__': 
-    generate_lhs_and_run(num_samples=200)
+    generate_lhs_and_run(num_samples=20)
