@@ -1,39 +1,25 @@
+"""Helper script to call main.py
+
+Obtains many realisations of the stochastic simulation, saving this data per simulation run to a .parquet file. 
+This file is stored in the ./output folder created during the simulation
+
+Typical usage may look like on a CLI:
+    python run_model.py
+
+If you face any issues, email: dwl25@ic.ac.uk or danielluo1143@gmail.com 
+"""
 import os
 import polars as pl
 import concurrent.futures
 import numpy as np
+import simulation_config as config
 from scipy.stats import qmc 
 from plot_trajectories import ModelPlot
 from main import ModelCall
 
-os.makedirs("output/states", exist_ok=True)
-os.makedirs("output/dwell_times", exist_ok=True)
-os.makedirs("output/reactions", exist_ok=True)
+output = config.out_dir
 
-default_model_var = {
-    "sox2_monomer_free": 10, 
-    "nanog_monomer_free": 1, 
-    "sox2_monomer_bound": 0, 
-    "nanog_monomer_bound": 0, 
-    "nanog_sox2_dimer_bound": 0, 
-    "nanog_nanog_dimer_bound": 0,
-    "nanog_sox2_dimer_free": 0,
-    "nanog_nanog_dimer_free": 0,
-    "nanog_sox2_dimer_single_bound": 0,
-    "nanog_nanog_dimer_single_bound": 0,
-    "mRNA": 0
-}
-
-default_model_param = {
-    "k_s_in": 0, "k_s_out": 0,
-    "k_n_in": 0, "k_in_out": 0, 
-    "k_bind_s": 1.0, "k_unbind_s": 0.06,
-    "k_bind_n": 1.0, "k_unbind_n": 0.24,
-    "k_dimerise": 0.0,  
-    "k_prod_m": 1.0,    
-    "k_deg_m": 0.53, 
-    "k_dissociate": 0
-}
+os.makedirs(f"{output}", exist_ok=True)
 
 def run_and_save_trajectory(run_id: int, sample_params: dict):
     """Wrapper to run the model, tag the data, and save to Parquet."""
@@ -46,24 +32,17 @@ def run_and_save_trajectory(run_id: int, sample_params: dict):
         track_history=False
     )
     
-    df_states, df_dwell, df_rxns = model.run_trajectory()
-    
-    mrna_counts = df_states["mRNA"].to_numpy()
-    
+    df_states, df_dwell, df_rxns = model.run_trajectory()    
     df_states = df_states.with_columns(pl.lit(run_id).alias("run_id"))
     df_dwell = df_dwell.with_columns(pl.lit(run_id).alias("run_id"))
     df_rxns = df_rxns.with_columns(pl.lit(run_id).alias("run_id"))
-    df_states.write_parquet(f"output/states/run_{run_id}.parquet")
-    df_dwell.write_parquet(f"output/dwell_times/run_{run_id}.parquet")
-    df_rxns.write_parquet(f"output/reactions/run_{run_id}.parquet")
-    
-    
+
+    mrna_counts = df_states["mRNA"].to_numpy()
     sox2_dwells = df_dwell.filter(pl.col("species") == "SOX2")["dwell_time"]
     nanog_dwells = df_dwell.filter(pl.col("species") == "NANOG")["dwell_time"]
     sox2_dwell_counts = sox2_dwells.to_numpy()    
     nanog_dwell_counts = nanog_dwells.to_numpy()
 
-    
     return {
         "run_id": run_id,
         "model_var": sample_params["rates"],
@@ -73,37 +52,39 @@ def run_and_save_trajectory(run_id: int, sample_params: dict):
         "nanog_dwell_counts": nanog_dwell_counts,    
     }
 
-def generate_lhs_and_run(num_samples: int):
-    sampler = qmc.LatinHypercube(d=4, optimization="random-cd")
+def generate_lhs_and_run(num_samples: int, dimensions:int, optimization:str = "random-cd"):
+    sampler = qmc.LatinHypercube(d=dimensions, optimization=optimization)
     sample = sampler.random(n=num_samples)
     # kbinds, kbindn, k_dimerise, kdissociate, sox2 free, nanog free
-    l_bounds = [0.1, 0.1, 0.1, 0.1]
-    u_bounds = [1.0, 1.0, 1.0, 1.0]
-    sample_scaled = qmc.scale(sample, l_bounds, u_bounds)    
+    sample_scaled = qmc.scale(sample, config.l_bounds, config.u_bounds)    
     metadata = []
-    for i in range(num_samples):
-        metadata.append({
-            "run_id": i,
-            "k_bind_s": sample_scaled[i][0],
-            "k_bind_n": sample_scaled[i][1],
-            "k_unbind_s": sample_scaled[i][2],
-            "k_unbind_n": sample_scaled[i][3],
-
-        })
+    # vary the number of parameters we are passing to metadata dependent on X
+    # number of parameters to pass to metadata dependent on length of model.param_perturb_map
     
-    pl.DataFrame(metadata).write_parquet("output/lhs_metadata.parquet")
+    for i in range(num_samples):
+        submission = {}
+        submission = submission | {
+            "run_id": i,
+        }
+        for param in config.param_perturb_map:  
+            perturbed_param_dict = {
+                param[0]: sample_scaled[i][param[1]]
+            }
+            submission = submission | perturbed_param_dict
+        metadata.append(submission)
+
+    print(metadata)
     df_meta = pl.DataFrame(metadata)
     summary_results = []
     with concurrent.futures.ProcessPoolExecutor(max_workers=8) as executor:
         futures = []
         for meta in metadata:
-            run_rates = default_model_param.copy() 
-            model_var = default_model_var.copy()
-            run_rates["k_bind_s"] = meta["k_bind_s"]
-            run_rates["k_bind_n"] = meta["k_bind_n"]
-            run_rates["k_unbind_s"] = meta["k_unbind_s"]
-            run_rates["k_unbind_n"] = meta["k_unbind_n"]
+            run_rates = config.model_param.copy() 
+            model_var = config.model_var.copy()
+            for rate in meta: 
+                run_rates[rate] = meta[rate]
             run_params = {"initial_state": model_var, "rates": run_rates}
+            
             futures.append(executor.submit(run_and_save_trajectory, meta["run_id"], run_params))
             
         for future in concurrent.futures.as_completed(futures):
@@ -115,9 +96,9 @@ def generate_lhs_and_run(num_samples: int):
             print("\nAggregating results and saving to Parquet...")
             df_summary = pl.DataFrame(summary_results)
             df_final = df_meta.join(df_summary, on="run_id")
-            save_path = "output/lhs_summary_results.parquet"
+            save_path = f"{output}/lhs_summary_results.parquet"
             df_final.write_parquet(save_path)
-            print(f"Successfully saved {len(df_final)} runs to {save_path}")
+            print(f"Successfully saved {len(df_final)} run(s) to {save_path}")
         
 if __name__ == '__main__': 
-    generate_lhs_and_run(num_samples=1)
+    generate_lhs_and_run(num_samples=config.samples, dimensions=config.dimensions, optimization=config.optimization)
