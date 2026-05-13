@@ -269,7 +269,7 @@ class ModelCall:
         primary_site = np.random.choice(free_indices)
         self.site_is_vacant[primary_site] = False
         self.site_bind_times[primary_site] = self.t
-        self.total_unbound_sites = np.sum(self.site_is_vacant)
+        self.total_unbound_sites -= 1
 
         # bind a dimer
         if is_dimer:
@@ -313,7 +313,7 @@ class ModelCall:
             self.site_bind_times[dissociating_site] = -1.0 
             self.site_is_vacant[dissociating_site] = True
             self.chromatin_lattice[dissociating_site] = 0  
-            self.total_unbound_sites = np.sum(self.site_is_vacant)              
+            self.total_unbound_sites += 1  
             # site was a dimer bound to two sites
             if self.dimer_partner_map[dissociating_site] != -1:
                 paired_site = self.dimer_partner_map[dissociating_site]
@@ -417,7 +417,7 @@ class ModelCall:
             self.site_is_vacant[target_vacant_site] = False
             self.site_bind_times[target_vacant_site] = self.t
             self.chromatin_lattice[target_vacant_site] = tether_tf_type
-            self.total_unbound_sites = np.sum(self.site_is_vacant)
+            self.total_unbound_sites -= 1
             
             # Form full bridge and remove tether status
             self._link_dimer_sites(tethered_site, target_vacant_site)
@@ -506,6 +506,14 @@ class ModelCall:
         """
         primary_site, secondary_site = -1, -1
         bulk_species_counts = self.state_map
+        
+        reaction_index_map = {
+            "SOX2_in": None,
+            "NANOG_in": None,
+            "SOX2_binding": self._handle_tf_binding(reaction_index),
+            "NANOG_binding": self._handle_tf_binding(reaction_index),
+            
+        }
         
         # bind any tf
         if reaction_index in [2, 3]: self._handle_tf_binding(reaction_index)
@@ -646,3 +654,40 @@ class ModelCall:
             self._execute_spatial_reaction(reaction_index)
 
         return self._generate_dataframes()
+    
+    
+model_var = {
+    "sox2_monomer_free": 10, 
+    "nanog_monomer_free": 1, 
+    "sox2_monomer_bound": 0, 
+    "nanog_monomer_bound": 0, 
+    "nanog_sox2_dimer_bound": 0, 
+    "nanog_nanog_dimer_bound": 0,
+    "nanog_sox2_dimer_free": 0,
+    "nanog_nanog_dimer_free": 0,
+    "nanog_sox2_dimer_single_bound": 0,
+    "nanog_nanog_dimer_single_bound": 0,
+    "mRNA": 0
+}
+
+model_param = {
+    "k_s_in": 0, "k_s_out": 0,
+    "k_n_in": 0, "k_in_out": 0, 
+    "k_bind_s": 1.0, "k_unbind_s": 0.06,
+    "k_bind_n": 1.0, "k_unbind_n": 0.24,
+    "k_dimerise": 0.0,  
+    "k_prod_m": 1.0,    
+    "k_deg_m": 0.53, 
+    "k_dissociate": 0
+}
+    
+    
+if __name__ == '__main__': 
+    model = ModelCall(
+        model_param=model_param, 
+        model_var=model_var, 
+        model_binding_sites=10, 
+        sim_max_time=100, 
+        track_history=False
+    )
+    print(model)
