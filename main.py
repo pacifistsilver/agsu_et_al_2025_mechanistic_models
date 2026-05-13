@@ -31,12 +31,7 @@ TODO:
 
 """
 
-class ModelContext:
-    ""
-
-
-
-class ModelCall:
+class ModelBuilder:
     """Handle a single model simulation for a given set of parameters/variables. 
     
     Returns dataframes detailing reaction history and dwell times for a single simulation.
@@ -213,31 +208,10 @@ class ModelCall:
     
     def _update_matrices(self):
         pass
+        
     
-    def _sample_spatial_pair(self, weight_matrix, total_weight):
-        """Helper: Randomly selects a 2D spatial pair based on flattened weights."""
-        flat_weights = weight_matrix.flatten()
-        chosen_idx = np.random.choice(len(flat_weights), p=(flat_weights / total_weight))
-        return divmod(chosen_idx, self.n_binding_sites)
 
-    def _link_dimer_sites(self, site1, site2):
-        """Helper: Forms a full bridge between two sites on the lattice."""
-        self.unpaired_monomer_mask[site1] = False
-        self.unpaired_monomer_mask[site2] = False 
-        self.dimer_partner_map[site1] = site2
-        self.dimer_partner_map[site2] = site1
-
-    def _unlink_dimer_sites(self, site1, site2):
-        """Helper: Breaks a bridge between two sites on the lattice."""
-        self.unpaired_monomer_mask[site1] = True
-        self.unpaired_monomer_mask[site2] = True
-        self.dimer_partner_map[site1] = -1
-        self.dimer_partner_map[site2] = -1
-
-    def _is_heterodimer(self, tf1_type, tf2_type):
-        """Helper: Returns True if the pair is SOX2:NANOG, False if NANOG:NANOG."""
-        return (tf1_type == 1 and tf2_type == 2) or (tf1_type == 2 and tf2_type == 1)
-    
+class ModelBinding(ModelBuilder):
     def _handle_tf_binding(self, reaction_index):
         """
         Handle all binding reactions. 
@@ -359,6 +333,31 @@ class ModelCall:
                     
             primary_site = dissociating_site
             self.reaction_history.append((self.t, self.reaction_names[reaction_index], primary_site, secondary_site))      
+  
+class ModelDimers(ModelBuilder):
+    def _sample_spatial_pair(self, weight_matrix, total_weight):
+        """Helper: Randomly selects a 2D spatial pair based on flattened weights."""
+        flat_weights = weight_matrix.flatten()
+        chosen_idx = np.random.choice(len(flat_weights), p=(flat_weights / total_weight))
+        return divmod(chosen_idx, self.n_binding_sites)
+
+    def _link_dimer_sites(self, site1, site2):
+        """Helper: Forms a full bridge between two sites on the lattice."""
+        self.unpaired_monomer_mask[site1] = False
+        self.unpaired_monomer_mask[site2] = False 
+        self.dimer_partner_map[site1] = site2
+        self.dimer_partner_map[site2] = site1
+
+    def _unlink_dimer_sites(self, site1, site2):
+        """Helper: Breaks a bridge between two sites on the lattice."""
+        self.unpaired_monomer_mask[site1] = True
+        self.unpaired_monomer_mask[site2] = True
+        self.dimer_partner_map[site1] = -1
+        self.dimer_partner_map[site2] = -1
+
+    def _is_heterodimer(self, tf1_type, tf2_type):
+        """Helper: Returns True if the pair is SOX2:NANOG, False if NANOG:NANOG."""
+        return (tf1_type == 1 and tf2_type == 2) or (tf1_type == 2 and tf2_type == 1)
 
     def _execute_site_dimerise(self, reaction_index):
         """Reaction 10: Handles site-site dimerisation on the chromatin lattice."""
@@ -483,6 +482,32 @@ class ModelCall:
                 self.molecule_counts[bulk_species_counts['nanog_monomer_free']] += 2
         
         self.reaction_history.append((self.t, self.reaction_names[reaction_index], -1, -1))
+
+
+
+class ModelCall(ModelBuilder, ModelBinding, ModelDimers):
+    def __init__(self, model_param, model_var, model_binding_sites, sim_max_time, record_interval = 1, track_history = True, promoter_site = None):
+        ModelBuilder.__init__(self, model_param, model_var, model_binding_sites, sim_max_time, record_interval, track_history, promoter_site)
+    
+        self._reaction_function_map = {
+            0: None,
+            1: None,
+            2: self._handle_tf_binding,
+            3: self._handle_tf_binding,
+            4: None,
+            5: None,
+            6: self._handle_tf_unbinding,
+            7: self._handle_tf_unbinding,
+            8: None,
+            9: None,
+            10: self._execute_site_dimerise,
+            11: self._execute_bulk_dimerise,
+            12: self._execute_tether_bind,
+            13: self._execute_site_dedimerise,
+            14: self._execute_bulk_dedimerise
+        }
+    
+    def _mRNA_update
     
     def _execute_spatial_reaction(self, reaction_index):
         """Reaction handler for a given reaction determined during run_trajectory call.
@@ -510,23 +535,7 @@ class ModelCall:
         """
         primary_site, secondary_site = -1, -1
         bulk_species_counts = self.state_map
-        
-        
-        #TODO: remove reaction decision logic and use lookup table to select appropriate reaction.
-        reaction_index_map = {
-            "SOX2_in": None,
-            "NANOG_in": None,
-            "SOX2_binding": self._handle_tf_binding(reaction_index),
-            "NANOG_binding": self._handle_tf_binding(reaction_index),
-            "mRNA_production": None,
-            "mRNA_degradation": None,
-            "dimerise_sites": self._execute_site_dimerise(reaction_index),
-            "dimerise_bulk": self._execute_bulk_dimerise(reaction_index),
-            "bind_dimer_head": self._execute_tether_bind(reaction_index),
-            "dissociate_dimer_sites": self._execute_site_dedimerise(reaction_index),
-            "dissociate_dimer_bulk": self._execute_bulk_dedimerise(reaction_index)
-        }
-        
+        self._reaction_dispatch[reaction_index](reaction_index)        
         # mRNA production/degradation
         if reaction_index in [8, 9]: 
             if reaction_index == 8: self.molecule_counts[bulk_species_counts['mRNA']] += 1
@@ -534,7 +543,7 @@ class ModelCall:
             
             self.reaction_history.append((self.t, self.reaction_names[reaction_index], -1, -1))
         else:
-            reaction_index_map[reaction_index]()
+            self._reaction_function_map[reaction_index](reaction_index)
         
 
     def _record_snapshot(self):
@@ -648,7 +657,7 @@ class ModelCall:
             self._execute_spatial_reaction(reaction_index)
 
         return self._generate_dataframes()
-    
+
     
 model_var = {
     "sox2_monomer_free": 10, 
