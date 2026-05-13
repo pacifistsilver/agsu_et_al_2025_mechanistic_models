@@ -101,6 +101,7 @@ class ModelCall:
         
         # track chromatin bound status, dimer status, tethered status.
         self.site_is_vacant = np.ones(self.n_binding_sites, dtype=bool)
+        self.total_unbound_sites = np.sum(self.site_is_vacant)
         self.unpaired_monomer_mask = np.zeros(self.n_binding_sites, dtype=bool)
         self.dimer_partner_map = np.full(self.n_binding_sites, -1, dtype=np.int32) # index value holds index it is paired with otherwise - 1
         self.promoter_site = int((len(self.chromatin_lattice) - 1)/2)
@@ -129,6 +130,8 @@ class ModelCall:
     def _calculate_propensities(self):
         """Update and return new propensities and molecule counts
         
+        Function 
+        
         Returns:
             propensities: np array describing propensity of all reactions which can occur during the simulation. 
             sum of the propensities. 
@@ -136,7 +139,8 @@ class ModelCall:
         """
         bulk_species_counts = self.state_map
         rate_constants = self.model_rate_constants      
-          
+        
+        # update bulk states
         sox2_monomer_free = self.molecule_counts[bulk_species_counts['sox2_monomer_free']]
         nanog_monomer_free = self.molecule_counts[bulk_species_counts['nanog_monomer_free']]
         sox2_monomer_bound = self.molecule_counts[bulk_species_counts['sox2_monomer_bound']]
@@ -147,9 +151,7 @@ class ModelCall:
         nanog_sox2_dimer_bound = self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_bound']]
         nanog_sox2_dimer_single_bound = self.molecule_counts[bulk_species_counts['nanog_sox2_dimer_single_bound']]
         nanog_nanog_dimer_single_bound = self.molecule_counts[bulk_species_counts['nanog_nanog_dimer_single_bound']]
-        
         mrna_count = self.molecule_counts[bulk_species_counts['mRNA']]        
-        unbound_sites = np.sum(self.site_is_vacant)
         
         unpaired_sox2_mask = (self.chromatin_lattice == 1) & self.unpaired_monomer_mask
         unpaired_nanog_mask = (self.chromatin_lattice == 2) & self.unpaired_monomer_mask
@@ -187,8 +189,8 @@ class ModelCall:
         propensities = np.array([
                 rate_constants.get('k_s_in', 0.0),                               # 0
                 rate_constants.get('k_n_in', 0.0),                               # 1
-                rate_constants.get('k_bind_s', 0.0) * (sox2_monomer_free + nanog_sox2_dimer_free) * unbound_sites,  # 2
-                rate_constants.get('k_bind_n', 0.0) * (nanog_monomer_free + nanog_nanog_dimer_free) * unbound_sites,  # 3
+                rate_constants.get('k_bind_s', 0.0) * (sox2_monomer_free + nanog_sox2_dimer_free) * self.total_unbound_sites,  # 2
+                rate_constants.get('k_bind_n', 0.0) * (nanog_monomer_free + nanog_nanog_dimer_free) * self.total_unbound_sites,  # 3
                 rate_constants.get('k_s_out', 0.0) * sox2_monomer_free,                       # 4
                 rate_constants.get('k_n_out', 0.0) * nanog_monomer_free,                       # 5
                 rate_constants.get('k_unbind_s', 0.0) * (sox2_monomer_bound + nanog_sox2_dimer_bound),               # 6
@@ -204,6 +206,10 @@ class ModelCall:
         return propensities, np.sum(propensities)
     
     ## helper functions for reactions
+    
+    def _update_matrices(self):
+        pass
+    
     def _sample_spatial_pair(self, weight_matrix, total_weight):
         """Helper: Randomly selects a 2D spatial pair based on flattened weights."""
         flat_weights = weight_matrix.flatten()
@@ -228,7 +234,7 @@ class ModelCall:
         """Helper: Returns True if the pair is SOX2:NANOG, False if NANOG:NANOG."""
         return (tf1_type == 1 and tf2_type == 2) or (tf1_type == 2 and tf2_type == 1)
     
-    def _handle_tf_binding_reaction(self, reaction_index):
+    def _handle_tf_binding(self, reaction_index):
         """
         Handle all binding reactions. 
         
@@ -263,6 +269,7 @@ class ModelCall:
         primary_site = np.random.choice(free_indices)
         self.site_is_vacant[primary_site] = False
         self.site_bind_times[primary_site] = self.t
+        self.total_unbound_sites = np.sum(self.site_is_vacant)
 
         # bind a dimer
         if is_dimer:
@@ -279,7 +286,7 @@ class ModelCall:
 
         self.reaction_history.append((self.t, self.reaction_names[reaction_index], primary_site, secondary_site))
     
-    def _handle_tf_unbinding_reaction(self, reaction_index):
+    def _handle_tf_unbinding(self, reaction_index):
         primary_site, secondary_site = -1, -1
         bulk_species_counts = self.state_map
 
@@ -305,7 +312,8 @@ class ModelCall:
             
             self.site_bind_times[dissociating_site] = -1.0 
             self.site_is_vacant[dissociating_site] = True
-            self.chromatin_lattice[dissociating_site] = 0                
+            self.chromatin_lattice[dissociating_site] = 0  
+            self.total_unbound_sites = np.sum(self.site_is_vacant)              
             # site was a dimer bound to two sites
             if self.dimer_partner_map[dissociating_site] != -1:
                 paired_site = self.dimer_partner_map[dissociating_site]
@@ -409,6 +417,7 @@ class ModelCall:
             self.site_is_vacant[target_vacant_site] = False
             self.site_bind_times[target_vacant_site] = self.t
             self.chromatin_lattice[target_vacant_site] = tether_tf_type
+            self.total_unbound_sites = np.sum(self.site_is_vacant)
             
             # Form full bridge and remove tether status
             self._link_dimer_sites(tethered_site, target_vacant_site)
@@ -499,10 +508,10 @@ class ModelCall:
         bulk_species_counts = self.state_map
         
         # bind any tf
-        if reaction_index in [2, 3]: self._handle_tf_binding_reaction(reaction_index)
+        if reaction_index in [2, 3]: self._handle_tf_binding(reaction_index)
         
         # unbinding
-        elif reaction_index in [6, 7]: self._handle_tf_unbinding_reaction(reaction_index)
+        elif reaction_index in [6, 7]: self._handle_tf_unbinding(reaction_index)
             
         # mRNA production/degradation
         elif reaction_index in [8, 9]: 
