@@ -31,6 +31,10 @@ TODO:
 
 """
 
+class ModelContext:
+    ""
+
+
 
 class ModelCall:
     """Handle a single model simulation for a given set of parameters/variables. 
@@ -507,41 +511,31 @@ class ModelCall:
         primary_site, secondary_site = -1, -1
         bulk_species_counts = self.state_map
         
+        
+        #TODO: remove reaction decision logic and use lookup table to select appropriate reaction.
         reaction_index_map = {
             "SOX2_in": None,
             "NANOG_in": None,
             "SOX2_binding": self._handle_tf_binding(reaction_index),
             "NANOG_binding": self._handle_tf_binding(reaction_index),
-            
+            "mRNA_production": None,
+            "mRNA_degradation": None,
+            "dimerise_sites": self._execute_site_dimerise(reaction_index),
+            "dimerise_bulk": self._execute_bulk_dimerise(reaction_index),
+            "bind_dimer_head": self._execute_tether_bind(reaction_index),
+            "dissociate_dimer_sites": self._execute_site_dedimerise(reaction_index),
+            "dissociate_dimer_bulk": self._execute_bulk_dedimerise(reaction_index)
         }
         
-        # bind any tf
-        if reaction_index in [2, 3]: self._handle_tf_binding(reaction_index)
-        
-        # unbinding
-        elif reaction_index in [6, 7]: self._handle_tf_unbinding(reaction_index)
-            
         # mRNA production/degradation
-        elif reaction_index in [8, 9]: 
+        if reaction_index in [8, 9]: 
             if reaction_index == 8: self.molecule_counts[bulk_species_counts['mRNA']] += 1
             else: self.molecule_counts[bulk_species_counts['mRNA']] -= 1
             
             self.reaction_history.append((self.t, self.reaction_names[reaction_index], -1, -1))
+        else:
+            reaction_index_map[reaction_index]()
         
-        elif reaction_index == 10:
-            self._execute_site_dimerise(reaction_index)
-
-        elif reaction_index == 11:
-            self._execute_bulk_dimerise(reaction_index)
-
-        elif reaction_index == 12:
-            self._execute_tether_bind(reaction_index)
-
-        elif reaction_index == 13:
-            self._execute_site_dedimerise(reaction_index)
-
-        elif reaction_index == 14:
-            self._execute_bulk_dedimerise(reaction_index)
 
     def _record_snapshot(self):
         """Record the current states of the simulation."""
