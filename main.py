@@ -23,12 +23,7 @@ from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
 
 """
-TODO: 
-    can probably simplify the dimerisation functions
-    so to the unbinding function
-    add in nanog-nanog/nanog-sox2 in the nanog binding case?
-    check tethering logic
-
+TODO: fix reaction lookup table in ModelCall class.
 """
 
 class ModelBuilder:
@@ -488,7 +483,7 @@ class ModelDimers(ModelBuilder):
 class ModelCall(ModelBuilder, ModelBinding, ModelDimers):
     def __init__(self, model_param, model_var, model_binding_sites, sim_max_time, record_interval = 1, track_history = True, promoter_site = None):
         ModelBuilder.__init__(self, model_param, model_var, model_binding_sites, sim_max_time, record_interval, track_history, promoter_site)
-    
+
         self._reaction_function_map = {
             0: None,
             1: None,
