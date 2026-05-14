@@ -72,7 +72,7 @@ class ModelBuilder:
             0: "prod_s", 1: "prod_n", 2: "bind_s", 3: "bind_n", 
             4: "deg_s", 5: "deg_n", 6: "unbind_s", 7: "unbind_n",
             8: "prod_m", 9: "deg_m", 10: "site_dimerise", 11: "bulk_dimerise",
-            12: "tether_bind", 13: "site_dedimerise", 14: "bulk_dedimerise"
+            12: "tether_bind", 13: "site_dedimerise", 14: "bulk_dedimerise", 15: "site_bulk_dimerise"
         }
 
         self.species_state_map = {name: i for i, name in enumerate(self.species_names)}
@@ -521,7 +521,61 @@ class ModelDimers():
         self.reaction_history.append((self.current_t, self.reaction_names[reaction_index], -1, -1))
         
         
-    
+    def _execute_site_bulk_dimerise(self, reaction_index):
+        """Handles dimerisation between a bound monomer and a free bulk monomer, forming a single-bound dimer."""
+        bulk = self.species_state_map
+        s_bound = self.species_counts[bulk['sox2_monomer_bound']]
+        n_bound = self.species_counts[bulk['nanog_monomer_bound']]
+        s_free = self.species_counts[bulk['sox2_monomer_free']]
+        n_free = self.species_counts[bulk['nanog_monomer_free']]
+
+        sn_pairs = s_bound * n_free
+        ns_pairs = n_bound * s_free
+        nn_pairs = n_bound * n_free
+        total_pairs = sn_pairs + ns_pairs + nn_pairs
+
+        if total_pairs > 0:
+            rand_val = np.random.rand() * total_pairs
+            
+            if rand_val < sn_pairs:
+                # SOX2 bound + NANOG free -> NANOG:SOX2 single bound
+                valid_sites = np.where((self.chromatin_lattice == 1) & self.chromatin_all_unpaired_monomers)[0]
+                if len(valid_sites) > 0:
+                    site = np.random.choice(valid_sites)
+                    self.chromatin_all_unpaired_monomers[site] = False
+                    self.chromatin_all_dangling_tf[site] = 2 # dangling NANOG
+                    
+                    self.species_counts[bulk['sox2_monomer_bound']] -= 1
+                    self.species_counts[bulk['nanog_monomer_free']] -= 1
+                    self.species_counts[bulk['nanog_sox2_dimer_single_bound']] += 1
+                
+            elif rand_val < sn_pairs + ns_pairs:
+                # NANOG bound + SOX2 free -> NANOG:SOX2 single bound
+                valid_sites = np.where((self.chromatin_lattice == 2) & self.chromatin_all_unpaired_monomers)[0]
+                if len(valid_sites) > 0:
+                    site = np.random.choice(valid_sites)
+                    self.chromatin_all_unpaired_monomers[site] = False
+                    self.chromatin_all_dangling_tf[site] = 1 # dangling SOX2
+                    
+                    self.species_counts[bulk['nanog_monomer_bound']] -= 1
+                    self.species_counts[bulk['sox2_monomer_free']] -= 1
+                    self.species_counts[bulk['nanog_sox2_dimer_single_bound']] += 1
+                
+            else:
+                # NANOG bound + NANOG free -> NANOG:NANOG single bound
+                valid_sites = np.where((self.chromatin_lattice == 2) & self.chromatin_all_unpaired_monomers)[0]
+                if len(valid_sites) > 0:
+                    site = np.random.choice(valid_sites)
+                    self.chromatin_all_unpaired_monomers[site] = False
+                    self.chromatin_all_dangling_tf[site] = 2 # dangling NANOG
+                    
+                    self.species_counts[bulk['nanog_monomer_bound']] -= 1
+                    self.species_counts[bulk['nanog_monomer_free']] -= 1
+                    self.species_counts[bulk['nanog_nanog_dimer_single_bound']] += 1
+
+            # Use site variable to log history. If no valid sites were found (edge case), default to -1.
+            record_site = site if 'site' in locals() else -1
+            self.reaction_history.append((self.current_t, self.reaction_names[reaction_index], record_site, -1))
 
 
 
@@ -545,7 +599,8 @@ class ModelCall(ModelBuilder, ModelBinding, ModelDimers):
             11: self._execute_bulk_dimerise,
             12: self._execute_tether_bind,
             13: self._execute_site_dedimerise,
-            14: self._execute_bulk_dedimerise
+            14: self._execute_bulk_dedimerise,
+            15: self._execute_site_bulk_dimerise
         }
     
     def _record_bulk_history(self, reaction_index):
