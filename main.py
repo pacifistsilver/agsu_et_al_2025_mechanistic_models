@@ -34,7 +34,8 @@ REACTION_NAMES = {
 
 
 class ModelState:
-    """
+    """Tracks the state of the simulation and includes commonly called methods. 
+    
         Attributes:
             rate_constants (dict): Reaction kinetic parameters (k_prod_s, k_bind_s, etc.).
             initial_species_states (dict): Initial molecule counts for the simulation.
@@ -180,6 +181,9 @@ class ModelState:
 
 class ModelLogger():
     """_summary_ Methods for recording reactions, and outputting DFs containing time course data for sites, residence times, and a list of all reactions that occur.
+    
+    Attributes:
+        state (class): inherits ModelState class methods and attributes to record all reaction information. 
     """
     def __init__(self, state: ModelState):
         self.state = state
@@ -235,7 +239,11 @@ class ModelLogger():
     
 
 class ModelReactions():
-    """Reaction logic
+    """Contains reaction logic methods to update ModelState attributes as dictated by the class ModelCall.
+    
+    Attributes:
+        state (class): inherits simulation state information and important state update methods from ModelState.
+        logger (class): inherits ModelLogger methods to track reactions, dwelltimes, etc.
     """
     def __init__(self, state: ModelState, logger: ModelLogger):
         self.state = state
@@ -548,6 +556,16 @@ class ModelReactions():
     
 
 class ModelCall():
+    """Class handles building simulation by calling ModelState, Logger, and Reactions. In addition to handling Gillespie algorithm logic and propensity calculations.
+    
+    Attributes:
+        model_param (dict): Reaction kinetic parameters (k_prod_s, k_bind_s, etc.).
+        model_var (dict): Initial molecule counts for the simulation.
+        model_binding_sites (int): Total number of binding sites in the chromatin lattice.
+        record_interval (float): Simulation time interval to record reactions.
+        sim_max_time (int): maximum simulation runtime. 
+ 
+    """
     def __init__(self, model_param: dict, model_var: dict, model_binding_sites: int, sim_max_time, record_interval: float = 1.0):
         self.record_interval = record_interval
         self.rates = model_param
