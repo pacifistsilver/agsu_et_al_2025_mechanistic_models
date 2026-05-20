@@ -15,7 +15,7 @@ import numpy as np
 import simulation_config as config
 from scipy.stats import qmc 
 from plot_trajectories import ModelPlot
-from main import ModelCall
+from model import ModelCall
 
 output = config.out_dir
 

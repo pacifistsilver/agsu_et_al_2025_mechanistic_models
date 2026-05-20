@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from concurrent.futures import ProcessPoolExecutor
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
-from main import ModelCall
+from model import ModelCall
 
 class ModelPlot:
     """Retrieve model outputs and partition function outputs and handle plotting of said data.
