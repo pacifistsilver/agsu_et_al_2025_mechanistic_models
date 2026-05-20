@@ -23,6 +23,20 @@ model_param = {
     "k_dissociate": 0
 }
 
+SPECIES_NAMES = [
+    "sox2_monomer_free", "nanog_monomer_free", "sox2_monomer_bound", "nanog_monomer_bound",
+    "nanog_sox2_dimer_bound", "nanog_nanog_dimer_bound", "nanog_sox2_dimer_free", 
+    "nanog_nanog_dimer_free", "nanog_sox2_dimer_single_bound", "nanog_nanog_dimer_single_bound", "mRNA"
+]
+SPECIES_MAP = {name: i for i, name in enumerate(SPECIES_NAMES)}
+
+REACTION_NAMES = {
+    0: "prod_s", 1: "prod_n", 2: "bind_s", 3: "bind_n", 4: "deg_s", 5: "deg_n", 
+    6: "unbind_s", 7: "unbind_n", 8: "prod_m", 9: "deg_m", 10: "site_dimerise", 
+    11: "bulk_dimerise", 12: "tether_bind", 13: "site_dedimerise", 14: "bulk_dedimerise", 15: "site_bulk_dimerise"
+}
+
+
 param_perturb_map = [
     ("k_bind_s", 0),
     ("k_unbind_s", 1),
@@ -30,6 +44,8 @@ param_perturb_map = [
     ("k_unbind_n", 3),    
 ]
 
+
+# lhs
 l_bounds = [0.1, 0.1, 0.1, 0.1]
 u_bounds = [1.0, 1.0, 1.0, 1.0]
 dimensions = 4
