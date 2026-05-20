@@ -17,20 +17,10 @@ If you face any issues, email: dwl25@ic.ac.uk or danielluo1143@gmail.com
 """
 import numpy as np
 import polars as pl
+import pandas as pd
+import simulation_config as config
 
-
-SPECIES_NAMES = [
-    "sox2_monomer_free", "nanog_monomer_free", "sox2_monomer_bound", "nanog_monomer_bound",
-    "nanog_sox2_dimer_bound", "nanog_nanog_dimer_bound", "nanog_sox2_dimer_free", 
-    "nanog_nanog_dimer_free", "nanog_sox2_dimer_single_bound", "nanog_nanog_dimer_single_bound", "mRNA"
-]
-SPECIES_MAP = {name: i for i, name in enumerate(SPECIES_NAMES)}
-
-REACTION_NAMES = {
-    0: "prod_s", 1: "prod_n", 2: "bind_s", 3: "bind_n", 4: "deg_s", 5: "deg_n", 
-    6: "unbind_s", 7: "unbind_n", 8: "prod_m", 9: "deg_m", 10: "site_dimerise", 
-    11: "bulk_dimerise", 12: "tether_bind", 13: "site_dedimerise", 14: "bulk_dedimerise", 15: "site_bulk_dimerise"
-}
+SPECIES_MAP = {name: i for i, name in enumerate(config.SPECIES_NAMES)}
 
 
 class ModelState:
@@ -47,7 +37,7 @@ class ModelState:
         self.total_sites = total_binding_sites
         self.promoter_site = promoter_site if promoter_site is not None else int((total_binding_sites - 1) / 2)
         
-        self.species_counts = np.zeros(len(SPECIES_NAMES), dtype=np.int32)
+        self.species_counts = np.zeros(len(config.SPECIES_NAMES), dtype=np.int32)
         for name, idx in SPECIES_MAP.items():
             self.species_counts[idx] = initial_species_states.get(name, 0)
             
@@ -192,7 +182,7 @@ class ModelLogger():
         self.reaction_history, self.residence_time_states = [], []
         
     def record_reaction(self, current_t, reaction_index, primary_site=-1, secondary_site=-1):
-        self.reaction_history.append((current_t, REACTION_NAMES[reaction_index], primary_site, secondary_site))
+        self.reaction_history.append((current_t, config.REACTION_NAMES[reaction_index], primary_site, secondary_site))
 
     def record_snapshot(self, current_t):
         self.times.append(current_t)
@@ -220,23 +210,19 @@ class ModelLogger():
                     species_label = "SOX2:NANOG" if (tf_type == 1 and tether_type == 2) or (tf_type == 2 and tether_type == 1) else "NANOG:NANOG"
                 else:
                     species_label = "SOX2" if tf_type == 1 else "NANOG"
-                self.residence_time_states.append([i, final_t - self.state.chromatin_site_bind_times[i], species_label])                    
+                self.residence_time_states.append([final_t - self.state.chromatin_site_bind_times[i], i, species_label])                    
         
-        state_data = {name: [s[idx] for s in self.bulk_states] for name, idx in SPECIES_MAP.items()}
-        state_data["time"] = self.times
-        
-        df_states = pl.DataFrame(state_data)
+        df_states = pl.DataFrame({
+            "time": self.times,
+            **{name: [s[idx] for s in self.bulk_states] for name, idx in SPECIES_MAP.items()}
+        })
+           
         df_dwell = pl.DataFrame(
-            {"dwell_site": [s[0] for s in self.residence_time_states], "dwell_time": [s[1] for s in self.residence_time_states], "species": [s[2] for s in self.residence_time_states]},
-            schema={"dwell_site": pl.Int64, "dwell_time": pl.Float64, "species": str},
+            {"time": [s[0] for s in self.residence_time_states], "dwell_site": [s[1] for s in self.residence_time_states], "species": [s[2] for s in self.residence_time_states]},
+            schema={"time": pl.Float64, "dwell_site": pl.Int64, "species": str},
         )
         df_rxns = pl.DataFrame(self.reaction_history, schema={"time": pl.Float64, "reaction_type": pl.String, "primary_site": pl.Int64, "secondary_site": pl.Int64}, orient="row")        
-        return df_states, df_dwell, df_rxns
-
-
-
-        
-    
+        return df_states, df_dwell, df_rxns   
 
 class ModelReactions():
     """Contains reaction logic methods to update ModelState attributes as dictated by the class ModelCall.
@@ -248,16 +234,16 @@ class ModelReactions():
     def __init__(self, state: ModelState, logger: ModelLogger):
         self.state = state
         self.logger = logger
-        self.dispatch_map = {
+        self.select_reaction_map = {
             0: self._log_only, 1: self._log_only, 4: self._log_only, 5: self._log_only, 8: self._log_only, 9: self._log_only,
             2: self._handle_tf_binding, 3: self._handle_tf_binding, 12: self._handle_tf_binding,
             6: self._handle_tf_unbinding, 7: self._handle_tf_unbinding,
             10: self._execute_site_dimerise, 11: self._execute_bulk_dimerise,
             13: self._execute_site_dedimerise, 14: self._execute_bulk_dedimerise, 15: self._execute_site_bulk_dimerise
         }
-
+    
     def execute(self, current_t, reaction_index):
-        self.dispatch_map[reaction_index](current_t, reaction_index)
+        self.select_reaction_map[reaction_index](current_t, reaction_index)
 
     def _log_only(self, current_t, reaction_index):
         self.logger.record_reaction(current_t, reaction_index)
@@ -388,7 +374,7 @@ class ModelReactions():
             else:
                 species_label = "SOX2" if tf_type == 1 else "NANOG"
 
-            self.logger.residence_time_states.append([dissociating_site, duration, species_label])                
+            self.logger.residence_time_states.append([duration, dissociating_site, species_label])                
             self.state.chromatin_site_bind_times[dissociating_site] = -1.0 
             self.state.set_site_state(dissociating_site, is_vacant=True, tf_type=0, is_undimered=False, dangling_tf_type=-1, dimer_partner=-1)
 
@@ -552,9 +538,6 @@ class ModelReactions():
                 self.state.species_counts[SPECIES_MAP['nanog_monomer_free']] += 2
         self.logger.record_reaction(current_t, reaction_index)
   
-
-    
-
 class ModelCall():
     """Class handles building simulation by calling ModelState, Logger, and Reactions. In addition to handling Gillespie algorithm logic and propensity calculations.
     
@@ -576,7 +559,7 @@ class ModelCall():
         self.reactions =  ModelReactions(self.state, self.logger)
 
     
-        self.stoichiometry_matrix = np.zeros((len(SPECIES_NAMES), len(REACTION_NAMES)), dtype=np.int32)
+        self.stoichiometry_matrix = np.zeros((len(config.SPECIES_NAMES), len(config.REACTION_NAMES)), dtype=np.int32)
         self.stoichiometry_matrix[SPECIES_MAP["sox2_monomer_free"], 0] = 1   
         self.stoichiometry_matrix[SPECIES_MAP["nanog_monomer_free"], 1] = 1  
         self.stoichiometry_matrix[SPECIES_MAP["sox2_monomer_free"], 4] = -1  
@@ -636,7 +619,6 @@ class ModelCall():
             tuple: the generated dataframes with simulation data: self.sim_variable_states_df, self.sim_site_dwell_times_df, self.sim_reaction_history_df
         """
         current_t = 0.0
-        next_record = 0.0
 
         while current_t < self.max_time:
             propensities, total_prop = self._calculate_propensities()
@@ -645,10 +627,7 @@ class ModelCall():
             r1, r2 = np.random.random(2)
             current_t += (1.0 / total_prop) * np.log(1.0 / r1)
             
-            if current_t >= next_record:
-                self.logger.record_snapshot(current_t)
-                next_record += self.record_interval
-
+            self.logger.record_snapshot(current_t)
             cumulative_props = np.cumsum(propensities)
             reaction_index = np.searchsorted(cumulative_props, r2 * total_prop)
             
@@ -657,23 +636,3 @@ class ModelCall():
 
         return self.logger.generate_dataframes(current_t)
 
-    
-    
-if __name__ == '__main__': 
-    INITIAL_MODEL_STATE = {
-        "sox2_monomer_free": 10, "nanog_monomer_free": 1, "mRNA": 0
-    }
-    MODEL_RATE_CONSTANTS = {
-        "k_bind_s": 1.0, "k_unbind_s": 0.06,
-        "k_bind_n": 1.0, "k_unbind_n": 0.24,
-        "k_dimerise": 1.0, "k_prod_m": 1.0, "k_deg_m": 0.53, "k_dissociate": 1
-    }
-    
-    sim = ModelCall(
-        model_param=MODEL_RATE_CONSTANTS, 
-        model_var=INITIAL_MODEL_STATE, 
-        model_binding_sites=10, 
-        sim_max_time=100
-    )
-    df_states, df_dwell, df_rxns = sim.run_trajectory()
-    print(df_rxns)
