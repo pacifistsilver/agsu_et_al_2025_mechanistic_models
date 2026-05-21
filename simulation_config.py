@@ -33,7 +33,7 @@ SPECIES_MAP = {name: i for i, name in enumerate(SPECIES_NAMES)}
 REACTION_NAMES = {
     0: "prod_s", 1: "prod_n", 2: "bind_s", 3: "bind_n", 4: "deg_s", 5: "deg_n", 
     6: "unbind_s", 7: "unbind_n", 8: "prod_m", 9: "deg_m", 10: "site_dimerise", 
-    11: "bulk_dimerise", 12: "tether_bind", 13: "site_dedimerise", 14: "bulk_dedimerise", 15: "site_bulk_dimerise"
+    11: "bulk_dimerise", 12: "tether_bind", 13: "site_dedimerise", 14: "bulk_dedimerise", 15: "site_bulk_dimerise", 16: "single_dimer_dedimerise"
 }
 
 
