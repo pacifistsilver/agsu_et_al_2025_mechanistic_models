@@ -182,7 +182,8 @@ class ModelLogger():
         self.reaction_history, self.residence_time_states = [], []
         
     def record_reaction(self, current_t, reaction_index, primary_site=-1, secondary_site=-1):
-        self.reaction_history.append((current_t, config.REACTION_NAMES[reaction_index], primary_site, secondary_site))
+        reaction_name = config.REACTION_NAMES[reaction_index] if reaction_index < len(config.REACTION_NAMES) else f"RXN_{reaction_index}"
+        self.reaction_history.append((current_t, reaction_name, primary_site, secondary_site))
 
     def record_snapshot(self, current_t):
         self.times.append(current_t)
@@ -200,29 +201,48 @@ class ModelLogger():
         for i in range(self.state.total_sites):
             if not self.state.chromatin_site_is_vacant[i] and self.state.chromatin_site_bind_times[i] != -1.0:
                 tf_type = self.state.chromatin_lattice[i]
+                paired_site = -1
+                
                 if self.state.chromatin_all_dimers[i] != -1:
-                    # check what type of dimer is bound to a site
                     partner = self.state.chromatin_all_dimers[i]
                     partner_type = self.state.chromatin_lattice[partner]
                     if i > partner: continue 
                     species_label = "SOX2:NANOG" if (tf_type == 1 and partner_type == 2) or (tf_type == 2 and partner_type == 1) else "NANOG:NANOG"
+                    paired_site = partner
                 elif self.state.chromatin_all_monovalent_partners[i] != -1:
                     tether_type = self.state.chromatin_all_monovalent_partners[i]
                     species_label = "SOX2:NANOG" if (tf_type == 1 and tether_type == 2) or (tf_type == 2 and tether_type == 1) else "NANOG:NANOG"
                 else:
                     species_label = "SOX2" if tf_type == 1 else "NANOG"
-                self.residence_time_states.append([final_t - self.state.chromatin_site_bind_times[i], i, species_label])                    
-        
+                
+                self.residence_time_states.append([
+                    final_t - self.state.chromatin_site_bind_times[i], 
+                    i, species_label, "STILL_BOUND", "END_OF_SIMULATION", paired_site, True
+                ])        
         df_states = pl.DataFrame({
             "time": self.times,
             **{name: [s[idx] for s in self.bulk_states] for name, idx in SPECIES_MAP.items()}
         })
            
         df_dwell = pl.DataFrame(
-            {"time": [s[0] for s in self.residence_time_states], "dwell_site": [s[1] for s in self.residence_time_states], "species": [s[2] for s in self.residence_time_states]},
-            schema={"time": pl.Float64, "dwell_site": pl.Int64, "species": str},
+            self.residence_time_states,
+            schema={
+                "event_duration": pl.Float64, 
+                "dwell_site": pl.Int64, 
+                "old_species": pl.String, 
+                "new_species": pl.String, 
+                "reaction_name": pl.String,
+                "paired_site": pl.Int64,
+                "is_bound": pl.Boolean
+            },
+            orient="row"
         )
-        df_rxns = pl.DataFrame(self.reaction_history, schema={"time": pl.Float64, "reaction_type": pl.String, "primary_site": pl.Int64, "secondary_site": pl.Int64}, orient="row")        
+        
+        df_rxns = pl.DataFrame(
+            self.reaction_history, 
+            schema={"time": pl.Float64, "reaction_type": pl.String, "primary_site": pl.Int64, "secondary_site": pl.Int64}, 
+            orient="row"
+        )        
         return df_states, df_dwell, df_rxns   
 
 class ModelReactions():
@@ -288,17 +308,18 @@ class ModelReactions():
         """
         return (tf1_type == 1 and tf2_type == 2) or (tf1_type == 2 and tf2_type == 1)
     
-    def _update_site_times(self, current_t, site, species_label, time_reset_value = -1.0):
-        bind_start_time = self.state.chromatin_site_bind_times[site]
+    def _update_site_times(self, event_end_time, site, old_species_label, new_species_label, reaction, paired_site=-1, is_bound=True, time_reset_value=-1.0):
+        event_start_time = self.state.chromatin_site_bind_times[site]
+        duration = (event_end_time - event_start_time) if event_start_time != -1.0 else (event_end_time - 0)
         
-        if bind_start_time != -1.0:
-            duration = current_t - bind_start_time
-            self.logger.residence_time_states.append([duration, site, species_label])
-            
+        reaction_name = config.REACTION_NAMES[reaction] if reaction < len(config.REACTION_NAMES) else f"RXN_{reaction}"
+        
+        self.logger.residence_time_states.append([
+            duration, site, old_species_label, new_species_label, reaction_name, paired_site, is_bound
+        ])
         self.state.chromatin_site_bind_times[site] = time_reset_value
-
     def _handle_tf_binding(self, current_t, reaction_index):
-        """Reaction logic for a dimerised/monomer TF binding to a site on chromatin array.
+        """Reaction logic for a dimerised/monomer TF binding to a vacant site on chromatin array.
 
         Args:
             current_t (int): current time of simulation 
@@ -307,39 +328,62 @@ class ModelReactions():
         free_indices = list(self.state.vacant_chromatin_sites)
         if len(free_indices) == 0: return
         
-        if reaction_index == 2: 
-            tf_type, monomer, monomer_bound = 1, "sox2_monomer_free", "sox2_monomer_bound"
-            dimer, dimer_single = "nanog_sox2_dimer_free", "nanog_sox2_dimer_single_bound"
-        else: 
-            tf_type, monomer, monomer_bound = 2, "nanog_monomer_free", "nanog_monomer_bound"
-            dimer, dimer_single = "nanog_nanog_dimer_free", "nanog_nanog_dimer_single_bound"
-
-        count_monomer = self.state.species_counts[SPECIES_MAP[monomer]]
-        count_dimer = self.state.species_counts[SPECIES_MAP[dimer]]
-        count_tether = self.state.monovalent_sox2_dimer_count if tf_type == 1 else self.state.dangling_nanog_count
-        
-        # choose random tf (monomer, dimer) to bind
-        total_tf_pool = count_monomer + count_dimer + count_tether
-        if total_tf_pool <= 0: return
-    
-        # if a dimer was chosen to bind
-        is_dimer = (np.random.rand() * total_tf_pool >= count_monomer)
         primary_site = np.random.choice(free_indices)
-        self.state.chromatin_site_bind_times[primary_site] = current_t
         
-        # the free dimer is now a single site bound dimer
-        if is_dimer:
-            dangling = 2 if dimer == "nanog_nanog_dimer_free" else (2 if tf_type == 1 else 1)
-            self.state.set_site_state(primary_site, is_vacant=False, tf_type=tf_type, dangling_tf_type=dangling)
-            self.state.species_counts[SPECIES_MAP[dimer]] -= 1
-            self.state.species_counts[SPECIES_MAP[dimer_single]] += 1        
-        else:
-            self.state.set_site_state(primary_site, is_vacant=False, tf_type=tf_type, is_undimered=True)
-            self.state.species_counts[SPECIES_MAP[monomer]] -= 1
-            self.state.species_counts[SPECIES_MAP[monomer_bound]] += 1
+        if reaction_index == 2:  # SOX2-mediated binding (Foot lands on SOX2 motif)
+            tf_type = 1
+            count_monomer = self.state.species_counts[SPECIES_MAP["sox2_monomer_free"]]
+            count_hetero = self.state.species_counts[SPECIES_MAP["nanog_sox2_dimer_free"]]
+            
+            total_pool = count_monomer + count_hetero
+            if total_pool <= 0: return
+            
+            rand_val = np.random.rand() * total_pool
+            
+            if rand_val < count_monomer:
+                # free SOX2 Monomer binds
+                self.state.set_site_state(primary_site, is_vacant=False, tf_type=tf_type, is_undimered=True)
+                self.state.species_counts[SPECIES_MAP["sox2_monomer_free"]] -= 1
+                self.state.species_counts[SPECIES_MAP["sox2_monomer_bound"]] += 1
+                species_label = "SOX2b"
+            else:
+                # sox2 arm of Heterodimer binds (NANOG arm dangles)
+                self.state.set_site_state(primary_site, is_vacant=False, tf_type=tf_type, dangling_tf_type=2)
+                self.state.species_counts[SPECIES_MAP["nanog_sox2_dimer_free"]] -= 1
+                self.state.species_counts[SPECIES_MAP["nanog_sox2_dimer_single_bound"]] += 1
+                species_label = "SOX2b:NANOGf"
+                
+        else:  # nanog-mediated binding (reaction_index == 3) (Foot lands on NANOG motif)
+            tf_type = 2
+            count_monomer = self.state.species_counts[SPECIES_MAP["nanog_monomer_free"]]
+            count_homo = self.state.species_counts[SPECIES_MAP["nanog_nanog_dimer_free"]]
+            count_hetero = self.state.species_counts[SPECIES_MAP["nanog_sox2_dimer_free"]]
+            
+            total_pool = count_monomer + count_homo + count_hetero
+            if total_pool <= 0: return
+            
+            rand_val = np.random.rand() * total_pool
+            
+            if rand_val < count_monomer:
+                self.state.set_site_state(primary_site, is_vacant=False, tf_type=tf_type, is_undimered=True)
+                self.state.species_counts[SPECIES_MAP["nanog_monomer_free"]] -= 1
+                self.state.species_counts[SPECIES_MAP["nanog_monomer_bound"]] += 1
+                species_label = "NANOGb"
+            elif rand_val < count_monomer + count_homo:
+                self.state.set_site_state(primary_site, is_vacant=False, tf_type=tf_type, dangling_tf_type=2)
+                self.state.species_counts[SPECIES_MAP["nanog_nanog_dimer_free"]] -= 1
+                self.state.species_counts[SPECIES_MAP["nanog_nanog_dimer_single_bound"]] += 1
+                species_label = "NANOGb:NANOGf"
+            else:
+                self.state.set_site_state(primary_site, is_vacant=False, tf_type=tf_type, dangling_tf_type=1)
+                self.state.species_counts[SPECIES_MAP["nanog_sox2_dimer_free"]] -= 1
+                self.state.species_counts[SPECIES_MAP["nanog_sox2_dimer_single_bound"]] += 1
+                species_label = "NANOGb:SOX2f"
 
+        self.state.chromatin_site_bind_times[primary_site] = current_t
+        self._update_site_times(current_t, primary_site, "EMPTY", species_label, reaction_index, time_reset_value=current_t, is_bound=True)
         self.logger.record_reaction(current_t, reaction_index, primary_site)
-    
+            
     def _handle_tf_unbinding(self, current_t, reaction_index):
         """Reaction logic for a TF unbinding from a site on the chromatin array.
 
@@ -353,53 +397,52 @@ class ModelReactions():
         
         if len(bound_indices) > 0:
             dissociating_site = np.random.choice(bound_indices)
-            duration = current_t - self.state.chromatin_site_bind_times[dissociating_site]
             
             # check for dimerisation partners/tethered status
             dimer_partner_index = self.state.chromatin_all_dimers[dissociating_site]
             old_dangling = self.state.chromatin_all_monovalent_partners[dissociating_site]
-                        
-            # for dissociating_site, there exists a dimer at some index.
-            if dimer_partner_index != -1:
-                dimered_type = self.state.chromatin_lattice[dimer_partner_index]
-                species_label = "SOX2:NANOG" if self._is_heterodimer(tf_type, dimered_type) else "NANOG:NANOG"
-            # was a monomer
-            else:
-                species_label = "SOX2" if tf_type == 1 else "NANOG"
-
-            self._update_site_times(
-                current_t=current_t, 
-                site=dissociating_site, 
-                species_label=species_label, 
-                reset_value=-1.0
-            )
-
             self.state.set_site_state(dissociating_site, is_vacant=True, tf_type=0, is_undimered=False, dangling_tf_type=-1, dimer_partner=-1)
 
             # update species counts accordingly.
             if dimer_partner_index != -1:
+                dimered_type = self.state.chromatin_lattice[dimer_partner_index]
+
                 self.state.set_site_state(dimer_partner_index, dimer_partner=-1, dangling_tf_type=tf_type)
                 if self._is_heterodimer(tf_type, dimered_type):
+                    old_species_label = "SOX2b:NANOGb" 
+                    new_species_label = "SOX2b:NANOGf" if tf_type == 1 else "SOX2f:NANOGb"
                     self.state.species_counts[SPECIES_MAP['nanog_sox2_dimer_bound']] -= 1
                     self.state.species_counts[SPECIES_MAP['nanog_sox2_dimer_single_bound']] += 1
                 else:
+                    old_species_label = "NANOGb:NANOGb" 
+                    new_species_label = "NANOGf:NANOGb" if tf_type == 1 else "NANOGb:NANOGf"
                     self.state.species_counts[SPECIES_MAP['nanog_nanog_dimer_bound']] -= 1
                     self.state.species_counts[SPECIES_MAP['nanog_nanog_dimer_single_bound']] += 1
             elif old_dangling != -1:
                 if self._is_heterodimer(tf_type, old_dangling):
+                    old_species_label = "SOX2b:NANOGf" if tf_type == 1 and old_dangling == 2 else "SOX2f:NANOGb"
+                    new_species_label = "SOX2f:NANOGf" 
                     self.state.species_counts[SPECIES_MAP['nanog_sox2_dimer_single_bound']] -= 1
                     self.state.species_counts[SPECIES_MAP['nanog_sox2_dimer_free']] += 1
                 else:
+                    old_species_label = "NANOGb:NANOGf" if tf_type == 2 and old_dangling == 2 else "NANOGf:NANOGb"
+                    new_species_label = "NANOGf:NANOGf" 
                     self.state.species_counts[SPECIES_MAP['nanog_nanog_dimer_single_bound']] -= 1
                     self.state.species_counts[SPECIES_MAP['nanog_nanog_dimer_free']] += 1
             else:
                 if tf_type == 1:
+                    old_species_label = "SOX2b"
+                    new_species_label = "EMPTY" 
                     self.state.species_counts[SPECIES_MAP['sox2_monomer_bound']] -= 1
                     self.state.species_counts[SPECIES_MAP['sox2_monomer_free']] += 1
                 else:
+                    old_species_label = "NANOGb"
+                    new_species_label = "EMPTY" 
                     self.state.species_counts[SPECIES_MAP['nanog_monomer_bound']] -= 1
                     self.state.species_counts[SPECIES_MAP['nanog_monomer_free']] += 1
-                    
+            
+            
+            self._update_site_times(current_t, dissociating_site, old_species_label, new_species_label, reaction_index, paired_site=-1, time_reset_value=-1.0, is_bound=False)
             self.logger.record_reaction(current_t, reaction_index, dissociating_site)      
 
     def _execute_bivalent_binding(self, current_t, reaction_index):
@@ -414,22 +457,25 @@ class ModelReactions():
             bound_tf_type = self.state.chromatin_lattice[tethered_site]
             dangling_tf_type = self.state.chromatin_all_monovalent_partners[tethered_site]
             
-            # the target site gets occupied by the dangling type
-            self.state.set_site_state(target_vacant_site, is_vacant=False, tf_type=dangling_tf_type)
-            self.state.chromatin_site_bind_times[target_vacant_site] = current_t
-            
-            self._link_dimer_sites(tethered_site, target_vacant_site)
-            self.state.set_site_state(tethered_site, dangling_tf_type=-1)
+            # the target site gets occupied by the subunit arm of the formerly monovalent dimer
+            self.state.set_site_state(target_vacant_site, is_vacant=False, tf_type=dangling_tf_type)                                            
             
             if self._is_heterodimer(bound_tf_type, dangling_tf_type):
+                old_species_label = "SOX2b:NANOGf" if bound_tf_type == 1 else "SOX2f:NANOGb"
+                new_species_label = "SOX2b:NANOGb"
                 self.state.species_counts[SPECIES_MAP['nanog_sox2_dimer_single_bound']] -= 1
                 self.state.species_counts[SPECIES_MAP['nanog_sox2_dimer_bound']] += 1
             else:
+                old_species_label, new_species_label = "NANOGb:NANOGf", "NANOGb:NANOGb"
                 self.state.species_counts[SPECIES_MAP['nanog_nanog_dimer_single_bound']] -= 1
                 self.state.species_counts[SPECIES_MAP['nanog_nanog_dimer_bound']] += 1
 
-            self.logger.record_reaction(current_t, reaction_index, tethered_site, target_vacant_site)
-    
+
+            self._update_site_times(current_t, tethered_site, old_species_label, new_species_label, reaction_index, paired_site=target_vacant_site, time_reset_value=current_t, is_bound=True)
+            self._update_site_times(current_t, target_vacant_site, "EMPTY", new_species_label, reaction_index, paired_site=tethered_site, time_reset_value=current_t, is_bound=True)
+            self._link_dimer_sites(tethered_site, target_vacant_site)
+            self.state.set_site_state(tethered_site, dangling_tf_type=-1)
+            self.logger.record_reaction(current_t, reaction_index, tethered_site, target_vacant_site) 
     
     def _execute_site_dimerise(self, current_t, reaction_index):
         """Reaction logic for an already bound TF to dimerise with another TF at some index in chromatin_lattice.
@@ -442,9 +488,17 @@ class ModelReactions():
             dimer_index, dimer_partner_index = self._sample_spatial_dimer(self.state.dimer_weight_matrix)
             dimer_index_tf_type = self.state.chromatin_lattice[dimer_index]
             dimer_partner_index_tf_type = self.state.chromatin_lattice[dimer_partner_index]         
-               
+        
+            old_species_label_index = "SOX2" if dimer_index_tf_type == 1 else "NANOG"
+            old_species_label_partner = "SOX2" if dimer_partner_index_tf_type == 1 else "NANOG"
+            new_species_label_index = "SOX2b:NANOGb" if self._is_heterodimer(dimer_index_tf_type, dimer_partner_index_tf_type) else "NANOGb:NANOGb"
+            
+            
             # update species counts accordingly
             if self._is_heterodimer(dimer_index_tf_type, dimer_partner_index_tf_type):
+                old_species_label_index = "SOX2b" if dimer_index_tf_type == 1 else "NANOGb"
+                old_species_label_partner = "SOX2b" if dimer_partner_index_tf_type == 1 else "NANOGb"
+                new_species_label_index = "SOX2b:NANOGb"
                 self.state.species_counts[SPECIES_MAP['nanog_sox2_dimer_bound']] += 1
                 self.state.species_counts[SPECIES_MAP['sox2_monomer_bound']] -= 1
                 self.state.species_counts[SPECIES_MAP['nanog_monomer_bound']] -= 1
@@ -452,6 +506,9 @@ class ModelReactions():
                 self.state.species_counts[SPECIES_MAP['nanog_nanog_dimer_bound']] += 1
                 self.state.species_counts[SPECIES_MAP['nanog_monomer_bound']] -= 2                
 
+
+            self._update_site_times(current_t, dimer_index, old_species_label_index, new_species_label_index, reaction_index, paired_site=dimer_partner_index, time_reset_value=current_t, is_bound=True)
+            self._update_site_times(current_t, dimer_partner_index, old_species_label_partner, new_species_label_index, reaction_index, paired_site=dimer_index, time_reset_value=current_t, is_bound=True)
             self._link_dimer_sites(dimer_index, dimer_partner_index)
             self.logger.record_reaction(current_t, reaction_index, dimer_index, dimer_partner_index)
 
@@ -505,6 +562,7 @@ class ModelReactions():
             # nanog bulk to sox2 bound dimerisation
             if rand_val < sn_dimers and len(self.state.undimered_sox2_sites) > 0:
                 site = np.random.choice(list(self.state.undimered_sox2_sites))
+                self._update_site_times(current_t, site, "SOX2b", "SOX2b:NANOGf", reaction_index, time_reset_value=current_t, is_bound=True)
                 self.state.set_site_state(site, is_undimered=False, dangling_tf_type=2)
                 self.state.species_counts[SPECIES_MAP['sox2_monomer_bound']] -= 1
                 self.state.species_counts[SPECIES_MAP['nanog_monomer_free']] -= 1
@@ -512,6 +570,7 @@ class ModelReactions():
             # sox2 bulk to nanog bound dimerisation
             elif rand_val < sn_dimers + ns_dimers and len(self.state.undimered_nanog_sites) > 0:
                 site = np.random.choice(list(self.state.undimered_nanog_sites))
+                self._update_site_times(current_t, site, "NANOGb", "SOX2f:NANOGb", reaction_index, time_reset_value=current_t, is_bound=True)                
                 self.state.set_site_state(site, is_undimered=False, dangling_tf_type=1)
                 self.state.species_counts[SPECIES_MAP['nanog_monomer_bound']] -= 1
                 self.state.species_counts[SPECIES_MAP['sox2_monomer_free']] -= 1
@@ -519,6 +578,7 @@ class ModelReactions():
             # nanog bulk to nanog bound dimerisation
             elif len(self.state.undimered_nanog_sites) > 0:
                 site = np.random.choice(list(self.state.undimered_nanog_sites))
+                self._update_site_times(current_t, site, "NANOGb", "NANOGb:NANOGf", reaction_index, time_reset_value=current_t, is_bound=True)
                 self.state.set_site_state(site, is_undimered=False, dangling_tf_type=2)
                 self.state.species_counts[SPECIES_MAP['nanog_monomer_bound']] -= 1
                 self.state.species_counts[SPECIES_MAP['nanog_monomer_free']] -= 1
@@ -538,7 +598,18 @@ class ModelReactions():
             site1 = np.random.choice(dimered_indices)
             site2 = self.state.chromatin_all_dimers[site1]
             dimer_index_tf_type, dimer_partner_index_tf_type = self.state.chromatin_lattice[site1], self.state.chromatin_lattice[site2]
-
+            
+            old_species_label = "SOX2b:NANOGb" if self._is_heterodimer(dimer_index_tf_type, dimer_partner_index_tf_type) else "NANOGb:NANOGb"
+            
+            if dimer_index_tf_type == 1 and dimer_partner_index_tf_type == 2: 
+                new_sp1, new_sp2 = "SOX2b", "NANOGb"
+            elif dimer_index_tf_type == 2 and dimer_partner_index_tf_type == 1:
+                new_sp1, new_sp2 = "NANOGb", "SOX2b"
+            else: 
+                new_sp1, new_sp2 = "NANOGb", "NANOGb"
+                                
+            self._update_site_times(current_t, site1, old_species_label, new_sp1, reaction_index, paired_site=-1, time_reset_value=current_t, is_bound=True)
+            self._update_site_times(current_t, site2, old_species_label, new_sp2, reaction_index, paired_site=-1, time_reset_value=current_t, is_bound=True)
             self.state.set_site_state(site1, is_undimered=True, dimer_partner=-1)
             self.state.set_site_state(site2, is_undimered=True, dimer_partner=-1)
             
@@ -572,8 +643,7 @@ class ModelReactions():
                 self.state.species_counts[SPECIES_MAP['nanog_nanog_dimer_free']] -= 1
                 self.state.species_counts[SPECIES_MAP['nanog_monomer_free']] += 2
         self.logger.record_reaction(current_t, reaction_index)
-        
-        
+             
     def _execute_single_bound_dedimerise(self, current_t, reaction_index):
         """Reaction logic for a dangling dimer snapping apart, dropping a monomer back to bulk."""
         # Find all sites holding a dangling leg
@@ -592,17 +662,25 @@ class ModelReactions():
         else:
             self.state.species_counts[SPECIES_MAP['nanog_monomer_free']] += 1
             
-        # Update bound status from single-bound dimer back to a bound monomer
+        # Update bound status from single-bound dimer back to a bound monomer        
         if self._is_heterodimer(bound_tf_type, dangling_tf_type):
             self.state.species_counts[SPECIES_MAP['nanog_sox2_dimer_single_bound']] -= 1
             if bound_tf_type == 1:
+                old_species_label = "SOX2b:NANOGf"
+                new_species_label = "SOX2b" 
                 self.state.species_counts[SPECIES_MAP['sox2_monomer_bound']] += 1
             else:
+                old_species_label = "SOX2f:NANOGb"
+                new_species_label = "NANOGb" 
                 self.state.species_counts[SPECIES_MAP['nanog_monomer_bound']] += 1
         else:
+            old_species_label = "NANOGb:NANOGf"
+            new_species_label = "NANOGb" 
             self.state.species_counts[SPECIES_MAP['nanog_nanog_dimer_single_bound']] -= 1
             self.state.species_counts[SPECIES_MAP['nanog_monomer_bound']] += 1
-            
+        
+        self._update_site_times(current_t, site, old_species_label, new_species_label, reaction_index, paired_site=-1, time_reset_value=current_t, is_bound=True)
+
         self.logger.record_reaction(current_t, reaction_index, site)
   
 class ModelCall():
@@ -663,33 +741,20 @@ class ModelCall():
         propensities = np.array([
             self.rates.get('k_s_in', 0.0),                                                                  # 0: S Prod
             self.rates.get('k_n_in', 0.0),                                                                  # 1: N Prod
-            
-            # Bulk binding relies ONLY on completely free molecules
             self.rates.get('k_bind_s', 0.0) * (s_free + ns_free) * len(self.state.vacant_chromatin_sites),  # 2: Bulk S/NS Binding
-            self.rates.get('k_bind_n', 0.0) * (n_free + nn_free) * len(self.state.vacant_chromatin_sites),  # 3: Bulk N/NN Binding
-            
+            self.rates.get('k_bind_n', 0.0) * (n_free + (nn_free * 2) + ns_free) * len(self.state.vacant_chromatin_sites),  # 3: Bulk N/NN Binding
             self.rates.get('k_s_out', 0.0) * s_free,                                                        # 4: S Deg
             self.rates.get('k_n_out', 0.0) * n_free,                                                        # 5: N Deg
-            
-            # Unbinding relies STRICTLY on physical occupancy of the lattice
             self.rates.get('k_unbind_s', 0.0) * len(self.state.bound_sox2_sites),                           # 6: S Unbind
             self.rates.get('k_unbind_n', 0.0) * len(self.state.bound_nanog_sites),                          # 7: N Unbind
-            
             self.rates.get('k_prod_m', 0.0) if promoter_on else 0.0,                                        # 8: mRNA Prod
             self.rates.get('k_deg_m', 0.0) * c[SPECIES_MAP.get('mRNA', 10)],                                # 9: mRNA Deg
-            
             self.rates.get('k_dimerise', 0.0) * (self.state.total_dimer_weight_symmetric / 2.0),            # 10: Site-Site Dimerise
             self.rates.get('k_dimerise', 0.0) * (bulk_nn + bulk_sn),                                        # 11: Bulk-Bulk Dimerise
-            
-            # TETHERING Reaction (Uses the specific spatial weight matrix)
             self.rates.get('k_bind_s', 0.0) * self.state.total_tether_weight,                               # 12: Tether Binding
-            
-            # Dissociation Reactions
             self.rates.get('k_dissociate', 0.0) * (len(self.state.dimered_dimer_sites) / 2.0),              # 13: Site-Site Dedimerise
             self.rates.get('k_dissociate', 0.0) * (ns_free + nn_free),                                      # 14: Bulk-Bulk Dedimerise
             self.rates.get('k_dimerise', 0.0) * site_bulk,                                                  # 15: Site-Bulk Dimerise
-            
-            # SINGLE-BOUND DEDIMERISE (Fixes the immortal dimer bug)
             self.rates.get('k_dissociate', 0.0) * (self.state.monovalent_sox2_dimer_count + self.state.dangling_nanog_count) # 16: Single-Bound Dedimerise
         ])
         
