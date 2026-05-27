@@ -225,7 +225,7 @@ class ModelLogger():
                 species_label = self.state.get_species_label(i)
                 
                 self.residence_time_states.append([
-                    final_t - self.state.chromatin_site_bind_times[i], 
+                    final_t - self.state.chromatin_site_bind_times[i], final_t,
                     i, paired_site, species_label, "STILL_BOUND", "END_OF_SIMULATION", True
                 ])        
                 df_states = pl.DataFrame({
@@ -236,7 +236,8 @@ class ModelLogger():
         df_dwell = pl.DataFrame(
             self.residence_time_states,
             schema={
-                "event_duration": pl.Float64, 
+                "event_duration": pl.Float64,
+                "current_sim_time": pl.Float64, 
                 "dwell_site": pl.Int64, 
                 "paired_site": pl.Int64,
                 "old_species": pl.String, 
@@ -316,14 +317,14 @@ class ModelReactions():
         """
         return (tf1_type == 1 and tf2_type == 2) or (tf1_type == 2 and tf2_type == 1)
     
-    def _update_site_times(self, event_end_time, site, old_species_label, new_species_label, reaction, paired_site=-1, is_bound=True, time_reset_value=-1.0):
+    def _update_site_times(self, current_sim_time, site, old_species_label, new_species_label, reaction, paired_site=-1, is_bound=True, time_reset_value=-1.0):
         event_start_time = self.state.chromatin_site_bind_times[site]
-        duration = (event_end_time - event_start_time) if event_start_time != -1.0 else (event_end_time - 0)
+        duration = (current_sim_time - event_start_time) if event_start_time != -1.0 else (current_sim_time - 0)
         
         reaction_name = config.REACTION_NAMES[reaction] if reaction < len(config.REACTION_NAMES) else f"RXN_{reaction}"
         
         self.logger.residence_time_states.append([
-            duration, site, paired_site, old_species_label, new_species_label, reaction_name, is_bound
+            duration, current_sim_time, site, paired_site, old_species_label, new_species_label, reaction_name, is_bound
         ])
         self.state.chromatin_site_bind_times[site] = time_reset_value
     
