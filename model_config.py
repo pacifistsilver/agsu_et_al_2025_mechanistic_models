@@ -1,5 +1,5 @@
 model_var = {
-    "sox2_monomer_free": 10, 
+    "sox2_monomer_free": 9, 
     "nanog_monomer_free": 1, 
     "sox2_monomer_bound": 0, 
     "nanog_monomer_bound": 0, 
@@ -16,8 +16,8 @@ model_param = {
     "k_s_in": 0, "k_s_out": 0,
     "k_n_in": 0, "k_in_out": 0, 
     "k_bind_s": 1.0, "k_unbind_s": 0.06,
-    "k_bind_n": 1.0, "k_unbind_n": 0.24,
-    "k_dimerise": 0.0,  
+    "k_bind_n": 1.0, "k_unbind_n": 0.2,
+    "k_dimerise": 0,  
     "k_prod_m": 1.0,    
     "k_deg_m": 0.53, 
     "k_dissociate": 0
@@ -33,23 +33,20 @@ SPECIES_MAP = {name: i for i, name in enumerate(SPECIES_NAMES)}
 REACTION_NAMES = {
     0: "prod_s", 1: "prod_n", 2: "bind_s", 3: "bind_n", 4: "deg_s", 5: "deg_n", 
     6: "unbind_s", 7: "unbind_n", 8: "prod_m", 9: "deg_m", 10: "site_dimerise", 
-    11: "bulk_dimerise", 12: "tether_bind", 13: "site_dedimerise", 14: "bulk_dedimerise", 15: "site_bulk_dimerise", 16: "single_dimer_dedimerise"
+    11: "bulk_dimerise", 12: "site_dedimerise", 13: "bulk_dedimerise", 14: "site_bulk_dimerise", 15: "single_dimer_dedimerise"
 }
 
 
 param_perturb_map = [
-    ("k_bind_s", 0),
-    ("k_unbind_s", 1),
-    ("k_bind_n", 2),
-    ("k_unbind_n", 3),    
+    ("k_unbind_s", 0),
 ]
 
 
 # lhs
-l_bounds = [0.1, 0.1, 0.1, 0.1]
-u_bounds = [1.0, 1.0, 1.0, 1.0]
-dimensions = 4
+l_bounds = [0.1]
+u_bounds = [1.0]
+dimensions = 1
 optimization = "random-cd"
-samples = 5
-out_dir = "output"
+samples = 100
+out_dir = "J:/test"
 

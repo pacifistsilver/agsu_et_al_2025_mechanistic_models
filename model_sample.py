@@ -13,7 +13,7 @@ import json
 import polars as pl
 import concurrent.futures
 import numpy as np
-import simulation_config as config
+import model_config as config
 from scipy.stats import qmc 
 from model import ModelCall
 

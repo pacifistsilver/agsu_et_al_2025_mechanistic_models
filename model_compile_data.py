@@ -3,7 +3,7 @@ import glob
 import json
 import polars as pl
 from model_stats import Statistics
-import simulation_config as config
+import model_config as config
 
 def parse_parameters_txt(filepath):
     """Safely extracts the dictionaries from the saved text file."""
@@ -18,7 +18,7 @@ def parse_parameters_txt(filepath):
 
 def compile_all_runs():
     base_dir = config.out_dir
-    param_folders = glob.glob(os.path.join(base_dir, "param_set_*"))
+    param_folders = glob.glob(os.path.join(base_dir, "param_set_0"))
     
     all_run_features = []
     
