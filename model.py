@@ -18,7 +18,7 @@ If you face any issues, email: dwl25@ic.ac.uk or danielluo1143@gmail.com
 import numpy as np
 import polars as pl
 import pandas as pd
-import simulation_config as config
+import model_config as config
 
 SPECIES_MAP = {name: i for i, name in enumerate(config.SPECIES_NAMES)}
 
@@ -48,6 +48,7 @@ class ModelState:
         self.chromatin_site_bind_times = np.full(self.total_sites, -1.0)
         self.vacant_chromatin_sites = set(range(self.total_sites))
         
+        # -1: monomer, -2: SOX2f:dimer, -3: NANOGf:dimer, >= 0: both bound
         self.chromatin_partner_state = np.full(self.total_sites, -1, dtype=np.int32)
         
         self.bound_sox2_sites = set()
@@ -66,8 +67,8 @@ class ModelState:
         
         
         self.total_dimer_weight_symmetric = 0.0
-        self.total_tether_weight_s = 0.0  # Weight of dangling SOX2s finding a site
-        self.total_tether_weight_n = 0.0  # Weight of dangling NANOGs finding a site
+        self.total_tether_weight_s = 0.0  
+        self.total_tether_weight_n = 0.0  
 
         # increment weights
         self.dimer_weight_matrix = np.zeros_like(self.dist_weighted_dimer_partners)
@@ -95,29 +96,38 @@ class ModelState:
 
     def update_site_weights(self, site):
         """Update spatial weight matrices to decide dimerisation partners."""
+        # dimerisation logic
         old_dimer_row_sum = np.sum(self.dimer_weight_matrix[site, :])
         new_dimer_row = np.zeros(self.total_sites)
         
         if self.chromatin_all_undimered_monomers[site]:
             tf_type = self.chromatin_lattice[site]
-            if tf_type == 1: valid_mask = (self.chromatin_lattice == 2) & self.chromatin_all_undimered_monomers
-            elif tf_type == 2: valid_mask = ((self.chromatin_lattice == 1) | (self.chromatin_lattice == 2)) & self.chromatin_all_undimered_monomers
-            else: valid_mask = np.zeros(self.total_sites, dtype=bool)
+            
+            # identify valid partners based on TF type
+            if tf_type == 1: 
+                valid_mask = (self.chromatin_lattice == 2) & self.chromatin_all_undimered_monomers
+            elif tf_type == 2: 
+                valid_mask = ((self.chromatin_lattice == 1) | (self.chromatin_lattice == 2)) & self.chromatin_all_undimered_monomers
+            else: 
+                valid_mask = np.zeros(self.total_sites, dtype=bool)
             
             valid_mask[site] = False
             new_dimer_row[valid_mask] = self.dist_weighted_dimer_partners[site, valid_mask]
         
+        # dimer updates
         self.dimer_weight_matrix[site, :] = new_dimer_row
         self.dimer_weight_matrix[:, site] = new_dimer_row
         self.total_dimer_weight_symmetric += (np.sum(new_dimer_row) - old_dimer_row_sum) * 2
-
+        
+        # update tethering row
         new_tether_row = np.zeros(self.total_sites)
         
         if self.chromatin_partner_state[site] in (-2, -3):
             vacant_mask = self.chromatin_site_is_vacant
             new_tether_row[vacant_mask] = self.dist_weighted_dimer_partners[site, vacant_mask]
             new_tether_row[site] = 0.0
-        
+            
+        # update tethering col  
         old_tether_col_sum = np.sum(self.bivalent_transition_matrix[:, site])
         new_tether_col = np.zeros(self.total_sites)
         
@@ -125,12 +135,18 @@ class ModelState:
             tether_mask = (self.chromatin_partner_state < -1) 
             new_tether_col[tether_mask] = self.dist_weighted_dimer_partners[tether_mask, site]
             new_tether_col[site] = 0.0
-            
+        
+        # bivalent updates
+        self.bivalent_transition_matrix[site, :] = new_tether_row
         self.bivalent_transition_matrix[:, site] = new_tether_col
+        
+        # global tethering weights update
         self.total_tether_weight += (np.sum(new_tether_col) - old_tether_col_sum)
         self.total_tether_weight_s = np.sum(self.bivalent_transition_matrix[self.chromatin_partner_state == -2, :])
         self.total_tether_weight_n = np.sum(self.bivalent_transition_matrix[self.chromatin_partner_state == -3, :])
         
+        
+                
     def set_site_state(self, site, is_vacant=None, tf_type=None, is_undimered=None, partner_state=None):
         """Update status of a site on the chromatin array when a binding/unbinding/dimerisation reaction occurs. 
 
@@ -228,10 +244,10 @@ class ModelLogger():
                     final_t - self.state.chromatin_site_bind_times[i], final_t,
                     i, paired_site, species_label, "STILL_BOUND", "END_OF_SIMULATION", True
                 ])        
-                df_states = pl.DataFrame({
-                    "time": self.times,
-                    **{name: [s[idx] for s in self.bulk_states] for name, idx in SPECIES_MAP.items()}
-                })
+        df_states = pl.DataFrame({
+            "time": self.times,
+            **{name: [s[idx] for s in self.bulk_states] for name, idx in SPECIES_MAP.items()}
+        })
            
         df_dwell = pl.DataFrame(
             self.residence_time_states,
@@ -345,7 +361,6 @@ class ModelReactions():
             
             rand_val = np.random.rand() * total_pool
             
-            # --- BULK BINDING ---
             if rand_val < bulk_s + bulk_ns:  
                 primary_site = np.random.choice(vacant_sites)
                 if rand_val < bulk_s:
@@ -363,7 +378,6 @@ class ModelReactions():
                 self._update_site_times(current_t, primary_site, "EMPTY", species_label, reaction_index, time_reset_value=current_t, is_bound=True)
                 self.logger.record_reaction(current_t, reaction_index, primary_site)
                 
-            # --- TETHERED BINDING ---
             else:  
                 self._execute_tethered_binding_logic(current_t, reaction_index, dangling_type=1, dangling_state_marker=-2)
                 
@@ -402,7 +416,6 @@ class ModelReactions():
                 self._update_site_times(current_t, primary_site, "EMPTY", species_label, reaction_index, time_reset_value=current_t, is_bound=True)
                 self.logger.record_reaction(current_t, reaction_index, primary_site)
                 
-            # --- TETHERED BINDING ---
             else: 
                 self._execute_tethered_binding_logic(current_t, reaction_index, dangling_type=2, dangling_state_marker=-3)            
     def _handle_tf_unbinding(self, current_t, reaction_index):
@@ -453,9 +466,13 @@ class ModelReactions():
         self._update_site_times(current_t, dissociating_site, old_label, "EMPTY", reaction_index, paired_site=-1, time_reset_value=current_t, is_bound=False)
         self.logger.record_reaction(current_t, reaction_index, dissociating_site)
     
-    def _execute_tethered_binding_logic(self, current_t, reaction_index, dangling_type, dangling_state_marker):
-        """Helper to execute intramolecular binding when selected via Gillespie."""
-        # 1. Mask the matrix so we ONLY sample from the correct dangling pool (SOX2 vs NANOG)
+    def _execute_tethered_binding_logic(self, current_t, reaction_index: int, dangling_type: int, dangling_state_marker: int):
+        """Helper to execute intramolecular binding.
+        """
+        
+        valid_state_markers = (-2, -3)
+        valid_dangling_type = ()
+        
         masked_matrix = np.copy(self.state.bivalent_transition_matrix)
         masked_matrix[self.state.chromatin_partner_state != dangling_state_marker, :] = 0
         
@@ -463,13 +480,11 @@ class ModelReactions():
         bound_tf_type = self.state.chromatin_lattice[tethered_site]
         old_tether_label = self.state.get_species_label(tethered_site)
         
-        # 2. Update states
         self.state.set_site_state(target_vacant_site, is_vacant=False, tf_type=dangling_type)
         self.state.set_site_state(tethered_site, partner_state=target_vacant_site)
         self.state.set_site_state(target_vacant_site, is_undimered=False, partner_state=tethered_site)
         new_label = self.state.get_species_label(tethered_site)
         
-        # 3. Update species pool
         if self._is_heterodimer(bound_tf_type, dangling_type):
             self.state.species_counts[SPECIES_MAP['nanog_sox2_dimer_single_bound']] -= 1
             self.state.species_counts[SPECIES_MAP['nanog_sox2_dimer_bound']] += 1
