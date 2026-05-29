@@ -16,9 +16,9 @@ def parse_parameters_txt(filepath):
     
     return json.loads(rates_str), json.loads(states_str)
 
-def compile_all_runs():
+def compile_all_runs(param_id: str):
     base_dir = config.out_dir
-    param_folders = glob.glob(os.path.join(base_dir, "param_set_0"))
+    param_folders = glob.glob(os.path.join(base_dir, param_id))
     
     all_run_features = []
     
@@ -27,7 +27,7 @@ def compile_all_runs():
     for folder in param_folders:
         try:
             # Extract ID from folder name (e.g., param_set_12 -> 12)
-            param_set_id = int(os.path.basename(folder).split("_")[-1])
+            param_set_id = os.path.basename(folder).replace("param_set_", "")
             
             # Read specific parameters for this LHS sample
             params_path = os.path.join(folder, "model_parameters.txt")
@@ -59,8 +59,8 @@ def compile_all_runs():
     master_df = pl.concat(all_run_features, how="diagonal").fill_null(0.0)
     
     # Save to disk
-    csv_out = os.path.join(base_dir, "master_per_run_features.csv")
-    parquet_out = os.path.join(base_dir, "master_per_run_features.parquet")
+    csv_out = os.path.join(base_dir, f"{param_id}_stats.csv")
+    parquet_out = os.path.join(base_dir, f"{param_id}_stats.parquet")
     
     master_df.write_csv(csv_out)
     master_df.write_parquet(parquet_out)
@@ -72,4 +72,5 @@ def compile_all_runs():
     print(f"Total Columns (Features): {len(master_df.columns)}")
 
 if __name__ == "__main__":
-    compile_all_runs()
+    param_id = "param_set_WT_NANOG_OE"
+    compile_all_runs(param_id= param_id)
