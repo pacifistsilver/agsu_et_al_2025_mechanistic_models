@@ -20,14 +20,14 @@ from model import ModelCall
 output = config.out_dir
 os.makedirs(output, exist_ok=True)
 
-def run_and_save_trajectory(run_id: int, param_set_id: int, sample_params: dict, param_set_dir: str):
+def run_and_save_trajectory(run_id: int, param_set_id: int, sample_params: dict, param_set_dir: str, sim_max_time: int, model_binding_sites: int):
     """Wrapper to run the model, tag the data, and save to Parquet instantly."""
     
     model = ModelCall(
-        model_param=sample_params["rates"],         # Fixed from your previous snippet
-        model_var=sample_params["initial_state"],   # Fixed from your previous snippet
-        model_binding_sites=10, 
-        sim_max_time=1000
+        model_param=sample_params["rates"],         
+        model_var=sample_params["initial_state"],   
+        model_binding_sites=model_binding_sites, 
+        sim_max_time=sim_max_time
     )
     
     df_states, df_dwell, df_rxns = model.run_trajectory()    
@@ -130,7 +130,7 @@ def generate_lhs_and_run(num_samples: int, dimensions: int, runs_per_param_set: 
             print(f"Successfully saved aggregated data to {save_path}")
 
 
-def run_single_parameter_set(runs: int = 100, param_set_id: int = 0, custom_rates: dict = None, custom_initial_state: dict = None):
+def run_single_parameter_set(sim_max_time: int, model_binding_sites: int, runs: int = 100, param_set_id: str = "", custom_rates: dict = None, custom_initial_state: dict = None):
     """
     Runs multiple stochastic realizations for a SINGLE parameter set without LHS.
     
@@ -182,7 +182,7 @@ def run_single_parameter_set(runs: int = 100, param_set_id: int = 0, custom_rate
         futures = []
         for run_id in range(runs):
             futures.append(
-                executor.submit(run_and_save_trajectory, run_id, param_set_id, run_params, param_set_dir)
+                executor.submit(run_and_save_trajectory, run_id, param_set_id, run_params, param_set_dir, sim_max_time, model_binding_sites)
             )
             
         # Track progress and await completion
@@ -208,10 +208,36 @@ def run_single_parameter_set(runs: int = 100, param_set_id: int = 0, custom_rate
         df_final = df_meta.join(df_summary, on="param_set_id")
         
         # Saved with a distinct name so it doesn't overwrite your LHS runs
-        save_path = os.path.join(output, f"baseline_{param_set_id}_summary_results.parquet")
+        save_path = os.path.join(output, f"{param_set_id}_summary_results.parquet")
         df_final.write_parquet(save_path)
         print(f"Successfully saved aggregated data to {save_path}")
 
 if __name__ == '__main__': 
-    # Notice the new 'runs_per_param_set' argument!
-    run_single_parameter_set(runs=1000, param_set_id=1)
+    
+    model_var = {
+    "sox2_monomer_free": 0, 
+    "nanog_monomer_free": 0, 
+    "sox2_monomer_bound": 0, 
+    "nanog_monomer_bound": 0, 
+    "nanog_sox2_dimer_bound": 0, 
+    "nanog_nanog_dimer_bound": 0,
+    "nanog_sox2_dimer_free": 1,
+    "nanog_nanog_dimer_free": 1,
+    "nanog_sox2_dimer_single_bound": 0,
+    "nanog_nanog_dimer_single_bound": 0,
+    "mRNA": 0
+    }
+    
+    model_param = {
+    "k_s_in": 0, "k_s_out": 0,
+    "k_n_in": 0, "k_in_out": 0, 
+    "k_bind_s": 1.0, "k_unbind_s": 0.06,
+    "k_bind_n": 0.1, "k_unbind_n": 0.2,
+    "k_dimerise": 0,  
+    "k_prod_m": 1.0,    
+    "k_deg_m": 0.53, 
+    "k_dissociate": 0
+    }
+
+    
+    run_single_parameter_set(sim_max_time = 1000, model_binding_sites= 10, runs=100, custom_initial_state = model_var, custom_rates=model_param, param_set_id="WT_NANOG_OE")
