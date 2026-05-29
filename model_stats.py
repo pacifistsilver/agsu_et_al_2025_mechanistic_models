@@ -80,15 +80,18 @@ class Statistics():
             
         if not all_completed_trajectories:
             return pl.LazyFrame(schema={"run_id": pl.Int32})
-            
-        # Format the output exactly like you wanted for your master table
-        mfpt_df = pl.DataFrame(all_completed_trajectories).group_by(["run_id", "starting_species"]).agg(
+
+        df_traj = pl.DataFrame(all_completed_trajectories)
+        hetero_rows = df_traj.filter(pl.col("starting_species").is_in(["NANOGb:SOX2f", "SOX2b:NANOGf"]))
+        hetero_rows = hetero_rows.with_columns(pl.lit("Heterodimer").alias("starting_species"))
+        df_traj_combined = pl.concat([df_traj, hetero_rows])
+        
+        mfpt_df = df_traj_combined.group_by(["run_id", "starting_species"]).agg(
             pl.col("bound_lifespan_s").mean()
         )
         
         pivot = mfpt_df.pivot(index="run_id", on="starting_species", values="bound_lifespan_s", aggregate_function="first")
         rename_map = {c: f"MFPT_{c}" for c in pivot.columns if c != "run_id"}
-        
         return pivot.rename(rename_map).lazy()
 
     def _track_run_trajectories(self, run_id, run_data):
@@ -100,54 +103,49 @@ class Statistics():
         for row in run_data.itertuples():
             site = getattr(row, "dwell_site", -1)
             paired = getattr(row, "paired_site", -1)
-            duration = getattr(row, "event_duration", 0.0)
+            current_t = getattr(row, "current_sim_time", 0.0)
             old_sp = getattr(row, "old_species", "UNKNOWN")
             new_sp = getattr(row, "new_species", "UNKNOWN")
             
-            # --- 1. UPDATE CLOCK ---
-            if site in active_lattice:
-                # Add duration to this molecule's lifespan
-                active_lattice[site]["bound_lifespan_s"] += duration
-
-            # --- 2. ROUTE THE EVENT ---
             
-            # CASE A: Brand New Arrival from Bulk (EMPTY -> Bound, no pair)
+            # paired IS newsp NOT oldsp IS
+            # paired NOT newsp NOT oldsp IS
+            # paired IS newp IS oldsp IS
+            # paired IS newp IS oldsp NOT
+            # paired NOT newp IS oldsp NOT
+            
+            # obtain rows where EMPTY - > DIMER
             if old_sp == "EMPTY" and paired == -1 and new_sp != "EMPTY":
                 molecule_counter += 1
                 active_lattice[site] = {
                     "molecule_id": molecule_counter,
                     "starting_species": new_sp,
-                    "bound_lifespan_s": 0.0
+                    "start_time": current_t  
                 }
-                
-            # CASE B: The "Step" Forward (Tethered Binding)
-            # A vacant site suddenly becomes bound and is paired to an existing site.
+            
+            # obtain rows where sliding occurs             
             elif old_sp == "EMPTY" and paired != -1 and new_sp != "EMPTY":
                 if paired in active_lattice:
-                    # Pass the EXACT SAME dictionary reference to the new foot's site.
-                    # This links them so they share the exact same lifespan clock and ID.
                     active_lattice[site] = active_lattice[paired]
 
-            # CASE C: Complete Unbinding to Bulk (Bound -> EMPTY, no pair)
+            # obtain rows where dissociation occurs
             elif old_sp != "EMPTY" and new_sp == "EMPTY" and paired == -1:
                 if site in active_lattice:
                     dying_molecule = active_lattice.pop(site)
+
+                    total_lifespan = current_t - dying_molecule["start_time"] 
+                    
                     completed.append({
                         "run_id": run_id,
                         "molecule_id": dying_molecule["molecule_id"],
                         "starting_species": dying_molecule["starting_species"],
-                        "bound_lifespan_s": dying_molecule["bound_lifespan_s"]
+                        "bound_lifespan_s": total_lifespan
                     })
-                    
-            # CASE D: One foot lifts up (The completion of the "Step")
-            # Site goes EMPTY, but it was paired, meaning the molecule survives on the other site.
+                
+            # rows where one foot exits
             elif old_sp != "EMPTY" and new_sp == "EMPTY" and paired != -1:
                 if site in active_lattice:
-                    # Just remove this foot from the lattice tracking.
-                    # Because the dictionary is shared by reference, the other site 
-                    # perfectly retains the molecule's ID and clock!
                     active_lattice.pop(site)
 
-        return completed
-        
+        return completed        
         
