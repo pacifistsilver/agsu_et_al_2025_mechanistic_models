@@ -63,8 +63,12 @@ class ModelState:
         chromatin_lattice_indicies = np.arange(self.total_sites)
         chromatin_potential_dimer_partners = np.abs(chromatin_lattice_indicies[:, None] - chromatin_lattice_indicies[None, :]) 
         self.dist_weighted_dimer_partners = np.exp(-chromatin_potential_dimer_partners / 1)
-        np.fill_diagonal(self.dist_weighted_dimer_partners, 0.0)
         
+        raw_weights = np.ones((self.total_sites, self.total_sites))
+        np.fill_diagonal(raw_weights, 0.0)   
+        
+        max_row_sum = np.max(raw_weights.sum(axis=1)) 
+        self.dist_weighted_dimer_partners = raw_weights / max_row_sum
         
         self.total_dimer_weight_symmetric = 0.0
         self.total_tether_weight_s = 0.0  
@@ -462,10 +466,10 @@ class ModelReactions():
             else:
                 self.state.species_counts[SPECIES_MAP['nanog_monomer_bound']] -= 1
                 self.state.species_counts[SPECIES_MAP['nanog_monomer_free']] += 1
-        
-        self._update_site_times(current_t, dissociating_site, old_label, "EMPTY", reaction_index, paired_site=-1, time_reset_value=current_t, is_bound=False)
-        self.logger.record_reaction(current_t, reaction_index, dissociating_site)
-    
+        surviving_foot_site = partner_state if partner_state >= 0 else -1
+        self._update_site_times(current_t, dissociating_site, old_label, "EMPTY", reaction_index, paired_site=surviving_foot_site, time_reset_value=current_t, is_bound=False)
+        self.logger.record_reaction(current_t, reaction_index, dissociating_site)   
+         
     def _execute_tethered_binding_logic(self, current_t, reaction_index: int, dangling_type: int, dangling_state_marker: int):
         """Helper to execute intramolecular binding.
         """
