@@ -28,15 +28,12 @@ class Statistics():
         unbound_stats = self._calc_unbound_features()
         dwell_stats = self._calc_dwell_features()
         
-        # Now uses the True Molecule Lifespan (Lagrangian Tracking)
-        mfpt_stats = self._build_all_trajectories()
+        mfpt_stats = self._return_mean_trajectories()
 
-        # Join everything into one master table
         master = mrna_stats.join(unbound_stats, on="run_id", how="left") \
                           .join(dwell_stats, on="run_id", how="left") \
                           .join(mfpt_stats, on="run_id", how="left")
 
-        # Inject metadata
         master = master.with_columns(pl.lit(param_set_id).alias("param_set_id"))
         for k, v in rates.items(): master = master.with_columns(pl.lit(v).alias(f"param_{k}"))
         for k, v in init_state.items(): master = master.with_columns(pl.lit(v).alias(f"init_{k}"))
@@ -65,12 +62,48 @@ class Statistics():
         
         pivot = dwells_df.pivot(index="run_id", on="old_species", values="event_duration", aggregate_function="first")
         return pivot.rename({c: f"mean_duration_{c}" for c in pivot.columns if c != "run_id"}).lazy()
+    
+    def _return_all_trajectories(self):
+        df = self.dwell_times_log.collect().to_pandas()
+        df = df.sort_values(by=["run_id", "current_sim_time", "multistep"])
+        
+        all_completed_trajectories = []
+        for run_id, run_data in df.groupby("run_id"):
+            run_trajectories = self._track_run_trajectories(run_id, run_data)
+            all_completed_trajectories.extend(run_trajectories)
+            
+        if not all_completed_trajectories:
+            return pl.LazyFrame(schema={"run_id": pl.Int32})
 
-    def _build_all_trajectories(self):
+        df_traj = pl.DataFrame(all_completed_trajectories)
+        hetero_rows = df_traj.filter(pl.col("starting_species").is_in(["NANOGb:SOX2f", "SOX2b:NANOGf"]))
+        hetero_rows = hetero_rows.with_columns(pl.lit("heterodimer").alias("starting_species"))
+        df_traj_combined = pl.concat([df_traj, hetero_rows])
+            
+        pivot = df_traj_combined.pivot(
+            index="run_id", 
+            on="starting_species", 
+            values=["bound_lifespan_s", "is_mature"], 
+            aggregate_function=pl.element() 
+        )
+        
+        rename_map = {}
+        for c in pivot.columns:
+            if c == "run_id":
+                continue
+            elif c.startswith("bound_lifespan_s_"):
+                species = c.replace("bound_lifespan_s_", "")
+                rename_map[c] = f"MFPT_{species}"
+            elif c.startswith("is_mature_"):
+                species = c.replace("is_mature_", "")
+                rename_map[c] = f"Mature_{species}"
+                
+        return pivot.rename(rename_map).lazy()    
+
+    def _return_mean_trajectories(self):
         """Converts the dwell log to pandas to chronologically track sliding molecules."""
         df = self.dwell_times_log.collect().to_pandas()
         
-        # Ensure it is strictly chronological so we can step through time perfectly
         df = df.sort_values(by=["run_id", "current_sim_time"])
         
         all_completed_trajectories = []
@@ -99,7 +132,7 @@ class Statistics():
         active_lattice = {} # Maps site index to a shared Molecule dictionary
         completed = []
         molecule_counter = 0
-
+        
         for row in run_data.itertuples():
             site = getattr(row, "dwell_site", -1)
             paired = getattr(row, "paired_site", -1)
@@ -120,28 +153,30 @@ class Statistics():
                 active_lattice[site] = {
                     "molecule_id": molecule_counter,
                     "starting_species": new_sp,
-                    "start_time": current_t  
+                    "start_time": current_t ,
+                    "multistep": False
                 }
             
             # obtain rows where sliding occurs             
             elif old_sp == "EMPTY" and paired != -1 and new_sp != "EMPTY":
                 if paired in active_lattice:
                     active_lattice[site] = active_lattice[paired]
+                    active_lattice[site]["multistep"] = True
 
             # obtain rows where dissociation occurs
             elif old_sp != "EMPTY" and new_sp == "EMPTY" and paired == -1:
                 if site in active_lattice:
                     dying_molecule = active_lattice.pop(site)
-
-                    total_lifespan = current_t - dying_molecule["start_time"] 
-                    
+                    total_lifespan = current_t - dying_molecule["start_time"]            
+                    species_label = dying_molecule["starting_species"]
+                                            
                     completed.append({
                         "run_id": run_id,
                         "molecule_id": dying_molecule["molecule_id"],
-                        "starting_species": dying_molecule["starting_species"],
-                        "bound_lifespan_s": total_lifespan
+                        "starting_species": species_label,
+                        "bound_lifespan_s": total_lifespan,
+                        "multistep": dying_molecule["multistep"] 
                     })
-                
             # rows where one foot exits
             elif old_sp != "EMPTY" and new_sp == "EMPTY" and paired != -1:
                 if site in active_lattice:
