@@ -110,3 +110,7 @@ dmypy.json
 *.txt
 *.csv
 *.html
+*.parquet
+*.log
+*.json
+*.documentation
