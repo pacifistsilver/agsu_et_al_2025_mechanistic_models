@@ -65,7 +65,7 @@ class Statistics():
     
     def _return_all_trajectories(self):
         df = self.dwell_times_log.collect().to_pandas()
-        df = df.sort_values(by=["run_id", "current_sim_time", "multistep"])
+        df = df.sort_values(by=["run_id", "current_sim_time"])
         
         all_completed_trajectories = []
         for run_id, run_data in df.groupby("run_id"):
@@ -76,30 +76,26 @@ class Statistics():
             return pl.LazyFrame(schema={"run_id": pl.Int32})
 
         df_traj = pl.DataFrame(all_completed_trajectories)
+        
         hetero_rows = df_traj.filter(pl.col("starting_species").is_in(["NANOGb:SOX2f", "SOX2b:NANOGf"]))
         hetero_rows = hetero_rows.with_columns(pl.lit("heterodimer").alias("starting_species"))
         df_traj_combined = pl.concat([df_traj, hetero_rows])
-            
-        pivot = df_traj_combined.pivot(
-            index="run_id", 
-            on="starting_species", 
-            values=["bound_lifespan_s", "is_mature"], 
-            aggregate_function=pl.element() 
-        )
-        
-        rename_map = {}
-        for c in pivot.columns:
-            if c == "run_id":
-                continue
-            elif c.startswith("bound_lifespan_s_"):
-                species = c.replace("bound_lifespan_s_", "")
-                rename_map[c] = f"MFPT_{species}"
-            elif c.startswith("is_mature_"):
-                species = c.replace("is_mature_", "")
-                rename_map[c] = f"Mature_{species}"
-                
-        return pivot.rename(rename_map).lazy()    
 
+        df_tidy = df_traj_combined.with_columns([
+            pl.when(pl.col("multistep") == True)
+              .then(pl.col("bound_lifespan_s"))
+              .otherwise(None)
+              .alias("mature_lifespan_s"),
+              
+            pl.when(pl.col("multistep") == False)
+              .then(pl.col("bound_lifespan_s"))
+              .otherwise(None)
+              .alias("transient_lifespan_s")
+        ])
+        
+        df_tidy = df_tidy.drop(["bound_lifespan_s", "multistep"])
+        
+        return df_tidy.lazy()
     def _return_mean_trajectories(self):
         """Converts the dwell log to pandas to chronologically track sliding molecules."""
         df = self.dwell_times_log.collect().to_pandas()
