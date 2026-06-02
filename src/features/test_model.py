@@ -11,7 +11,7 @@ In more detail, we test for:
 
 import pytest
 import numpy as np
-from model import TranscriptionFactor, ModelState, ModelCall
+from src.features.model import TranscriptionFactor, ModelState, ModelCall
 
 ## initialise model
 @pytest.fixture

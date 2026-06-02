@@ -2,8 +2,8 @@ import os
 import glob
 import json
 import polars as pl
-from model_stats import Statistics
-import model_config as config
+from src.features.model_stats import Statistics
+import src.features.model_config as config
 
 def parse_parameters_txt(filepath):
     """Extracts the dictionaries from the saved text file."""

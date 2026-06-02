@@ -14,9 +14,9 @@ import json
 import polars as pl
 import concurrent.futures
 import numpy as np
-import model_config as config
+import src.features.model_config as config
 from scipy.stats import qmc
-from model import ModelCall, TranscriptionFactor
+from src.features.model import ModelCall, TranscriptionFactor
 
 
 output = config.out_dir
