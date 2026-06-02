@@ -107,7 +107,6 @@ dmypy.json
 
 # plots and logs
 *.png
-*.txt
 *.csv
 *.html
 *.parquet
@@ -115,3 +114,5 @@ dmypy.json
 *.json
 *.documentation
 .DS_Store
+/output
+/.snakemake

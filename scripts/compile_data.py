@@ -1,4 +1,4 @@
-from src.features.model_compile_data import _return_all_mfpt_trajectories
+from src.expression_model.model_compile_data import _return_all_mfpt_trajectories
 
 experiment_name = snakemake.params.experiment
 folder_prefix = f"param_set_{experiment_name}"

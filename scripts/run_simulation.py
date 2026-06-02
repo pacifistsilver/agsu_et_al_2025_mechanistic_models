@@ -1,6 +1,6 @@
 import os
-import src.features.model_config as config
-from src.features.model_sample import run_single_parameter_set
+import src.expression_model.model_config as config
+from src.expression_model.model_sample import run_single_parameter_set
 
 
 if __name__ == "__main__":
