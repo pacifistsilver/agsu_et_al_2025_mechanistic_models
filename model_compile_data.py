@@ -6,7 +6,7 @@ from model_stats import Statistics
 import model_config as config
 
 def parse_parameters_txt(filepath):
-    """Safely extracts the dictionaries from the saved text file."""
+    """Extracts the dictionaries from the saved text file."""
     with open(filepath, 'r') as f:
         content = f.read()
     
@@ -50,7 +50,7 @@ def compile_all_runs(param_id: str):
             print(f"Skipping {folder} due to error: {e}")
             
     if not all_run_features:
-        print("No data extracted. Exiting.")
+        raise FileNotFoundError(f"No data extracted for {param_id}. Cannot create output parquet.")
         return
         
     print("\nConcatenating master dataset...")
@@ -71,8 +71,7 @@ def compile_all_runs(param_id: str):
     print(f"Total Rows (Individual Runs): {len(master_df)}")
     print(f"Total Columns (Features): {len(master_df.columns)}")
 
-
-def _return_all_mfpt_trajectories(param_id: str):
+def _return_all_mfpt_trajectories(param_id: str, sim_time: int, n_sites: int):
     base_dir = config.out_dir
     param_folders = glob.glob(os.path.join(base_dir, param_id))
     
@@ -86,8 +85,8 @@ def _return_all_mfpt_trajectories(param_id: str):
             
             stats = Statistics.from_parquet_dir(
                 param_set_dir=folder, 
-                total_sim_time=1000, 
-                total_binding_sites=10
+                total_sim_time=sim_time, 
+                total_binding_sites=n_sites
             )
             
             df_features = stats._return_all_trajectories()
@@ -120,6 +119,3 @@ def _return_all_mfpt_trajectories(param_id: str):
     print(f"Total Rows (Individual Runs): {len(master_df)}")
     print(f"Total Columns (Features): {len(master_df.columns)}")
 
-if __name__ == "__main__":
-    param_id = "param_set_WT_NANOG_OE"
-    compile_all_runs(param_id= param_id)
