@@ -1,83 +1,188 @@
+"""Tests for model.py
+
+In more detail, we test for:
+    1. Chromatin arrays and dictionaries are initialised correctly.
+    2. set_site_state method correctly updates states.
+    3. promoter logic is correct. i.e. the correct tf binds.
+    4. get_species_label method correctly translates species > label
+    5. _calculate_propensities returns correct propensities given a system snapshot.
+"""
+
+
 import pytest
 import numpy as np
-from unittest.mock import MagicMock, patch
+from model import TranscriptionFactor, ModelState, ModelCall
 
-# Import your model classes (adjust the import path if necessary)
-from model import ModelState, SPECIES_MAP, config
-
-# --- MOCK FIXTURES ---
+## initialise model
+@pytest.fixture
+def sample_tfs():
+    return [
+        TranscriptionFactor(id=1, name="SOX2", valency=2, is_activator=True),
+        TranscriptionFactor(id=2, name="NANOG", valency=2, is_activator=False)
+    ]
 
 @pytest.fixture
-def mock_state():
-    """
-    Creates a simplified ModelState with a 5-site lattice.
-    We mock the logger and reactions to prevent downstream errors during testing.
-    """
-    # Assuming ModelState takes (total_binding_sites, initial_species_states, promoter_site)
-    initial_counts = {name: 0 for name in config.SPECIES_NAMES}
-    state = ModelState(total_binding_sites=5, initial_species_states=initial_counts, promoter_site=0)
-    
-    # Mocking external dependencies attached to the model
-    state.logger = MagicMock()
-    
-    return state
+def initial_counts():
+    return {
+        "sox2_monomer_free": 10,
+        "nanog_monomer_free": 5,
+        "mRNA": 0
+    }
 
 @pytest.fixture
-def model_with_tether(mock_state):
-    """
-    Sets up a specific scenario:
-    - Lattice size: 5 (Indices 0, 1, 2, 3, 4)
-    - Site 2 is occupied by SOX2 (tf_type=1) and has a dangling NANOG (-3)
-    - Sites 1 and 3 are empty
-    - Site 4 is occupied by something else
-    """
-    # Force lattice state
-    mock_state.chromatin_lattice = np.array([0, 0, 1, 0, 1])  # 1 = SOX2, 0 = Empty
-    mock_state.chromatin_site_is_vacant = np.array([True, True, False, True, False])
-    mock_state.chromatin_all_undimered_monomers = np.array([False, False, False, False, False])
-    
-    # -3 means tethered to NANOGf. -1 means no partner.
-    mock_state.chromatin_partner_state = np.array([-1, -1, -3, -1, -1]) 
-    
-    # Initialize the spatial matrices
-    indices = np.arange(5)
-    chromatin_potential_dimer_partners = np.abs(indices[:, None] - indices[None, :])
-    mock_state.dist_weighted_dimer_partners = np.exp(-chromatin_potential_dimer_partners / 1)
-    np.fill_diagonal(mock_state.dist_weighted_dimer_partners, 0.0)
-    
-    mock_state.bivalent_transition_matrix = np.zeros((5, 5))
-    
-    return mock_state
+def base_state(sample_tfs, initial_counts):
+    return ModelState(
+        tfs=sample_tfs, 
+        total_binding_sites=10, 
+        initial_species_states=initial_counts,
+        promoter_site=4
+    )
 
+## TF logic tests
+def test_tf_dangling_id(sample_tfs):
+    sox2, nanog = sample_tfs
+    
+    assert sox2.dangling_id == -2
+    assert nanog.dangling_id == -3
 
-# --- TEST CASES ---
+## ModelState tests
+def test_model_state_initialisation(base_state):
+    assert base_state.total_sites == 10
+    assert base_state.promoter_site == 4
+    
+    # check if all sites start vacant
+    assert np.all(base_state.chromatin_site_is_vacant == True)
+    assert len(base_state.vacant_chromatin_sites) == 10
+    
+    # check dictionaries built correctly
+    assert 1 in base_state.bound_sites
+    assert 2 in base_state.bound_sites
+    assert base_state.dangling_counts[1] == 0
 
-def test_tether_spatial_weighting(model_with_tether):
-    """
-    Tests that update_site_weights correctly populates the bivalent_transition_matrix
-    ONLY for vacant sites, and applies the exponential distance penalty.
-    """
-    state = model_with_tether
+## test binding site transitions
+def test_set_site_state_binding(base_state):
+    # bind a SOX2 (id=1) to site 3
+    base_state.set_site_state(site=3, is_vacant=False, tf_id=1, is_undimered=True)
     
-    # Call the update function specifically for the occupied site
-    state.update_site_weights(site=2)
-    
-    # Extract the transition probabilities for the dangling foot at Site 2
-    transition_row = state.bivalent_transition_matrix[2, :]
-    print(transition_row)
-    
-    # 1. It should NOT be able to bind to itself
-    assert transition_row[2] == 0.0
-    
-    # 2. It should NOT be able to bind to Site 4 (which is already occupied)
-    assert transition_row[4] == 0.0
-    
-    # 3. It SHOULD be able to bind to adjacent Sites 1 and 3
-    assert transition_row[1] > 0.0
-    assert transition_row[3] > 0.0
-    
-    # 4. Site 1 and 3 are distance=1 away. Site 0 is distance=2.
-    # Therefore, the probability of hitting 1 or 3 should be higher than 0.
-    assert transition_row[1] == transition_row[3]
-    assert transition_row[1] > transition_row[0]
+    assert base_state.chromatin_lattice[3] == 1
+    assert base_state.chromatin_site_is_vacant[3] == False
+    assert 3 not in base_state.vacant_chromatin_sites
+    assert 3 in base_state.bound_sites[1]
+    assert base_state.chromatin_all_undimered_monomers[3] == True
 
+def test_set_site_state_unbinding(base_state):
+    # bind, then unbind
+    base_state.set_site_state(site=3, is_vacant=False, tf_id=1)
+    base_state.set_site_state(site=3, is_vacant=True, tf_id=0)
+    
+    assert base_state.chromatin_lattice[3] == 0
+    assert base_state.chromatin_site_is_vacant[3] == True
+    assert 3 in base_state.vacant_chromatin_sites
+    assert 3 not in base_state.bound_sites[1]
+
+def test_set_site_state_dimerisation(base_state):
+    # bind SOX2 to site 0, NANOG to site 1, and tether them together
+    base_state.set_site_state(site=0, tf_id=1, partner_state=1)
+    base_state.set_site_state(site=1, tf_id=2, partner_state=0)
+    
+    assert base_state.chromatin_partner_state[0] == 1
+    assert base_state.chromatin_partner_state[1] == 0
+    assert 0 in base_state.dimered_dimer_sites
+    assert 1 in base_state.dimered_dimer_sites
+
+def test_set_site_state_dangling_dimer(base_state):
+    # bind SOX2 to site 5, but it has a dangling NANOG (partner_state = -3)
+    base_state.set_site_state(site=5, tf_id=1, partner_state=-3)
+    
+    assert base_state.chromatin_partner_state[5] == -3
+    assert base_state.dangling_counts[2] == 1 # Nanog (id=2) count increases
+
+## test promoter logic
+def test_is_promoter_active_vacant(base_state):
+    assert base_state.is_promoter_active() == False
+
+def test_is_promoter_active_direct_activator(base_state):
+    # bind SOX2 (activator) directly to promoter
+    p_site = base_state.promoter_site
+    base_state.set_site_state(site=p_site, is_vacant=False, tf_id=1)
+    
+    assert base_state.is_promoter_active() == True
+
+def test_is_promoter_active_direct_non_activator(base_state):
+    # bind NANOG (non-activator) directly to promoter
+    p_site = base_state.promoter_site
+    base_state.set_site_state(site=p_site, is_vacant=False, tf_id=2)
+    
+    assert base_state.is_promoter_active() == False
+
+def test_is_promoter_active_bridged_activator(base_state):
+    # bind NANOG to promoter (non-activator), tethered to SOX2 at another site
+    p_site = base_state.promoter_site
+    other_site = p_site + 1
+    
+    # setup tether
+    base_state.set_site_state(site=p_site, is_vacant=False, tf_id=2, partner_state=other_site)
+    base_state.set_site_state(site=other_site, is_vacant=False, tf_id=1, partner_state=p_site)
+    
+    assert base_state.is_promoter_active() == True
+
+# test label generation
+
+def test_get_species_label(base_state):
+    # test Vacant
+    assert base_state.get_species_label(0) == "EMPTY"
+    
+    # test Monomer Bound
+    base_state.set_site_state(site=0, is_vacant=False, tf_id=1, partner_state=-1)
+    assert base_state.get_species_label(0) == "SOX2b"
+    
+    # test Dangling
+    base_state.set_site_state(site=0, partner_state=-3) # Dangling NANOG
+    assert base_state.get_species_label(0) == "SOX2b:NANOGf"
+    
+    # test Bivalent Heterodimer
+    base_state.set_site_state(site=1, is_vacant=False, tf_id=2, partner_state=0)
+    base_state.set_site_state(site=0, partner_state=1)
+    assert base_state.get_species_label(0) == "NANOGb:SOX2b"
+
+# test propensities calculation
+
+def test_calculate_propensities_no_rates(sample_tfs, initial_counts):
+    # if all rates are 0, propensities must be 0
+    empty_rates = {}
+    
+    model = ModelCall(
+        tfs=sample_tfs, 
+        model_param=empty_rates, 
+        model_var=initial_counts, 
+        model_binding_sites=10, 
+        sim_max_time=100
+    )
+    
+    props, total = model._calculate_propensities()
+    assert total == 0.0
+    assert np.all(props == 0.0)
+
+def test_calculate_propensities_mrna_production(sample_tfs, initial_counts):
+    rates = {"k_prod_m": 5.0}
+    model = ModelCall(sample_tfs, rates, initial_counts, 10, 100)
+    
+    # force promoter to be ON
+    p_site = model.state.promoter_site
+    model.state.set_site_state(site=p_site, is_vacant=False, tf_id=1)
+    
+    props, total = model._calculate_propensities()
+    
+    # index 8 is mRNA production in your matrix
+    assert props[8] == 5.0
+    assert total == 5.0
+
+def test_calculate_propensities_mrna_degradation(sample_tfs, initial_counts):
+    rates = {"k_deg_m": 0.5}
+    initial_counts["mRNA"] = 10 # Start with 10 mRNA
+    
+    model = ModelCall(sample_tfs, rates, initial_counts, 10, 100)
+    
+    props, total = model._calculate_propensities()
+    
+    assert props[9] == 5.0
