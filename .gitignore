@@ -114,3 +114,4 @@ dmypy.json
 *.log
 *.json
 *.documentation
+.DS_Store
