@@ -11,7 +11,7 @@ cd $PBS_O_WORKDIR
 mkdir -p logs
 module load miniforge/3
 eval "$(~/miniforge3/bin/conda shell.bash hook)"
-conda activate snakemake_env 
+conda activate snakemake 
 
 CORES=$(wc -l < $PBS_NODEFILE)
 echo "Starting Snakemake pipeline on $CORES cores..."
@@ -21,4 +21,6 @@ echo "Running on node: $(hostname)"
 snakemake -s multiparam_set.smk \
     --cores $CORES \
     --keep-going \
-    --printshellcmds
+    --printshellcmds \
+    --snakefile multiparam_set.smk \
+    --config exp=src/config/hetmer_excl.yaml
