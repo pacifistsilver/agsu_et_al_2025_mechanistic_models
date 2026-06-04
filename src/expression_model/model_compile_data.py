@@ -71,51 +71,50 @@ def compile_all_runs(param_id: str):
     print(f"Total Rows (Individual Runs): {len(master_df)}")
     print(f"Total Columns (Features): {len(master_df.columns)}")
 
-def _return_all_mfpt_trajectories(param_id: str, sim_time: int, n_sites: int):
-    base_dir = config.out_dir
-    param_folders = glob.glob(os.path.join(base_dir, param_id))
+def _return_all_mfpt_trajectories(
+    param_id: str, 
+    sim_time: int, 
+    n_sites: int = 10,
+    output_dir: str = "output"   
+):
+    """Compiles MFPT data from a specific parameter set directory into a single dataframe."""
+    print(f"Extracting all MFPT trajectories for {param_id}...")
     
-    all_run_features = []
-    for folder in param_folders:
-        try:
-            param_set_id = os.path.basename(folder).replace("param_set_", "")
-            
-            params_path = os.path.join(folder, "model_parameters.txt")
-            rates, initial_state = parse_parameters_txt(params_path)
-            
-            stats = Statistics.from_parquet_dir(
-                param_set_dir=folder, 
-                total_sim_time=sim_time, 
-                total_binding_sites=n_sites
-            )
-            
-            df_features = stats._return_all_trajectories()
-            
-            if isinstance(df_features, pl.LazyFrame):
-                df_features = df_features.collect()
-                
-            all_run_features.append(df_features)
-            
-            print(f"Processed param_set_{param_set_id} ({len(df_features)} runs)")
-            
-        except Exception as e:
-            print(f"Skipping {folder} due to error: {e}")
-            
-    if not all_run_features:
-        print("No data extracted. Exiting.")
-        return
-        
-    print("\nConcatenating master dataset...")
+    # 1. Resolve the exact directory directly (No glob.glob needed)
+    param_dir = os.path.join(output_dir, str(param_id))
     
-    master_df = pl.concat(all_run_features, how="diagonal").fill_null(0.0)
-    
-    parquet_out = os.path.join(base_dir, f"{param_id}_all_mfpt_histogram_data.parquet")
-    
-    master_df.write_parquet(parquet_out)
-    
-    print(f"\nSUCCESS! Master dataset saved to:")
-    print(f" -> {parquet_out}")
-    
-    print(f"Total Rows (Individual Runs): {len(master_df)}")
-    print(f"Total Columns (Features): {len(master_df.columns)}")
+    if not os.path.exists(param_dir):
+        raise FileNotFoundError(f"Parameter directory does not exist: {param_dir}")
 
+    try:
+        # 2. Load the statistics for this specific folder
+        stats = Statistics.from_parquet_dir(
+            param_set_dir=param_dir, 
+            total_sim_time=sim_time, 
+            total_binding_sites=n_sites
+        )
+        
+        # 3. Extract the trajectory features
+        df_features = stats._return_all_trajectories()
+        
+        if isinstance(df_features, pl.LazyFrame):
+            df_features = df_features.collect()
+            
+    except Exception as e:
+        # Safe error logging that doesn't rely on undefined variables
+        print(f"Error extracting trajectories from {param_dir}: {e}")
+        raise e
+        
+    if df_features.is_empty():
+        print(f"No trajectory data found for {param_id}.")
+        return df_features
+        
+    # 4. Save the compiled data back into that specific parameter's folder
+    param_basename = os.path.basename(param_dir)
+    parquet_out = os.path.join(param_dir, f"{param_basename}_all_mfpt_histogram_data.parquet")
+    
+    df_features.write_parquet(parquet_out)
+    print(f"SUCCESS! Trajectories saved to: {parquet_out}")
+    
+    # 5. CRITICAL: Return the DataFrame so Seaborn in plot_data.py can actually plot it!
+    return df_features

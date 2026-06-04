@@ -9,4 +9,4 @@ rates:
   k_prod_m: 1.0
   k_deg_m: 0.53
 initial_state:
-  nanog_nanog_dimer_free: 1
+  nanog_sox2_dimer_free: 1

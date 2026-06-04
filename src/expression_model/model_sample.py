@@ -114,7 +114,7 @@ def generate_lhs_and_run(
 
             run_params = {"initial_state": model_var, "rates": run_rates}
 
-            param_set_dir = os.path.join(output, f"param_set_{param_set_id}")
+            param_set_dir = os.path.join(output, str(param_set_id))
             os.makedirs(os.path.join(param_set_dir, "states"), exist_ok=True)
             os.makedirs(os.path.join(param_set_dir, "dwell_times"), exist_ok=True)
             os.makedirs(os.path.join(param_set_dir, "rxns"), exist_ok=True)
@@ -171,17 +171,12 @@ def run_single_parameter_set(
     param_set_id: str = "",
     custom_rates: dict = None,
     custom_initial_state: dict = None,
+    output_dir: str = "output"   # <--- 1. NEW ARGUMENT ADDED
 ):
     """
     Runs multiple stochastic trajectories for a given parameter/variable set.
-
-    Args:
-        runs: number of simulations to execute for this parameter set.
-        param_set_id: arbritary ID to tag this batch
-        custom_rates: dictionary of rates to override the defaults in config.py.
-        custom_initial_state: dictionary of initial states to override defaults in config.py.
     """
-    # 1. Setup specific parameters for this run (falling back to config defaults)
+    # 1. Setup specific parameters for this run
     run_rates = config.model_param.copy()
     if custom_rates:
         run_rates.update(custom_rates)
@@ -196,7 +191,9 @@ def run_single_parameter_set(
     meta.update(run_rates)
     meta.update(model_var)
     df_meta = pl.DataFrame([meta])
-    param_set_dir = os.path.join(output, f"param_set_{param_set_id}")
+    
+    # 2. FIXED FOLDER CREATION (Uses dynamic output_dir & removes "param_set_")
+    param_set_dir = os.path.join(output_dir, str(param_set_id))
     os.makedirs(os.path.join(param_set_dir, "states"), exist_ok=True)
     os.makedirs(os.path.join(param_set_dir, "dwell_times"), exist_ok=True)
     os.makedirs(os.path.join(param_set_dir, "rxns"), exist_ok=True)
@@ -237,7 +234,6 @@ def run_single_parameter_set(
                 summary_results.append(completed_run_data)
                 completed += 1
 
-                # Update print frequency for single sets (e.g., every 10% or 10 runs)
                 if completed % max(1, runs // 10) == 0 or completed == runs:
                     print(f"Completed {completed}/{runs} runs...")
             except Exception as e:
@@ -247,14 +243,18 @@ def run_single_parameter_set(
         print("\nAggregating single parameter set summary results...")
         df_summary = pl.DataFrame(summary_results)
 
-        # Join metadata so the output format matches your LHS output format perfectly
         df_final = df_meta.join(df_summary, on="param_set_id")
 
-        # Saved with a distinct name so it doesn't overwrite your LHS runs
-        save_path = os.path.join(output, f"{param_set_id}_summary_results.parquet")
+        # 3. FIXED SAVE PATH LOGIC
+        save_path = os.path.join(output_dir, f"{param_set_id}_summary_results.parquet")
+        
+        # CRITICAL: If param_set_id has a slash (e.g., "sweep/kbn..."), 
+        # we must guarantee the parent folder exists before saving the parquet!
+        os.makedirs(os.path.dirname(save_path), exist_ok=True) 
+        
         df_final.write_parquet(save_path)
         print(f"Successfully saved aggregated data to {save_path}")
-
+        
 
 def execute_simulation(run_id: int, param_set: dict) -> dict:
     """Purely runs the math and returns raw data in memory."""
