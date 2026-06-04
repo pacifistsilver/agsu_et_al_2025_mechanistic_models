@@ -6,11 +6,11 @@ sys.path.append("src")
 configfile: config.get("exp", "src/config/default.yaml")
 OUTDIR = config.get("output_dir", "heterodimer")
 
-K_BIND_N_VALS_ALL = [f"{x:.2f}" for x in np.linspace(0.01, 1.0, num=2)]
-K_BIND_S_VALS_ALL = [f"{x:.2f}" for x in np.linspace(0.01, 1.0, num=2)]
+K_BIND_N_VALS_ALL = [f"{x:.2f}" for x in np.linspace(0.01, 1.0, num=100)]
+K_BIND_S_VALS_ALL = [f"{x:.2f}" for x in np.linspace(0.01, 1.0, num=100)]
 
-K_BIND_N_VALS_SUBSET = [f"{x:.2f}" for x in np.linspace(0.01, 1.0, num=1)]
-K_BIND_S_VALS_SUBSET = [f"{x:.2f}" for x in np.linspace(0.01, 1.0, num=1)]
+K_BIND_N_VALS_SUBSET = [f"{x:.2f}" for x in np.linspace(0.01, 1.0, num=10)]
+K_BIND_S_VALS_SUBSET = [f"{x:.2f}" for x in np.linspace(0.01, 1.0, num=10)]
 
 rule all:
     input:
