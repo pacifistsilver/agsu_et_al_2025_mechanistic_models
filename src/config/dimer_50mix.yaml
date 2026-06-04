@@ -1,0 +1,13 @@
+experiment_name: "heterodimer_only"
+sim_time: 1000
+runs: 100
+rates:
+  k_bind_s: 1.0
+  k_unbind_s: 0.06
+  k_bind_n: 0.1
+  k_unbind_n: 0.2
+  k_prod_m: 1.0
+  k_deg_m: 0.53
+initial_state:
+  nanog_sox2_dimer_free: 5
+  nanog_nanog_dimer_free: 5
