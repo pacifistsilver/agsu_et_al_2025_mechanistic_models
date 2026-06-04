@@ -10,3 +10,4 @@ rates:
   k_deg_m: 0.53
 initial_state:
   nanog_nanog_dimer_free: 1
+output_dir: "hodmer_excl"

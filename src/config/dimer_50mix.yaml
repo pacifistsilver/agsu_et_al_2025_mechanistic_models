@@ -11,3 +11,4 @@ rates:
 initial_state:
   nanog_sox2_dimer_free: 5
   nanog_nanog_dimer_free: 5
+output_dir: "dimer_50mix"
