@@ -5,3 +5,4 @@ scipy
 seaborn
 matplotlib
 pyarrow
+snakemake
