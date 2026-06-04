@@ -11,3 +11,4 @@ rates:
 initial_state:
   sox2_monomer_free: 1
   nanog_monomer_free: 1
+output_dir: "monomer_excl"
