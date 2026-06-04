@@ -1,15 +1,20 @@
-EXPERIMENTS = ["nanog_heterodimer_excl", "nanog_dimer_mixed"]
+import sys
+sys.path.append("src")
+from expression_model.config_default import model_param, model_var
+
+configfile: config.get("exp", "src/config/default.yaml")
 
 rule all:
     input:
-        expand("output/param_set_{experiment}_all_mfpt_histogram_data.parquet", experiment=EXPERIMENTS)
-        
+        expand("output/param_set_{exp}_all_mfpt_histogram_data.parquet", 
+               exp=config["experiment_name"])        
 # sim
 rule simulate:
     output:
         "output/param_set_{experiment}/simulation.done"
     params:
-        experiment = "{experiment}"
+        config_path = config.get("exp", "src/config/default.yaml")    ,
+        experiment = config["experiment_name"]
     script:
         "scripts/run_simulation.py"
 
