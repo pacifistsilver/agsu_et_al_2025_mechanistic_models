@@ -2,8 +2,8 @@
 #PBS -N gene_sim_sweep
 #PBS -l select=1:ncpus=72:mem=120gb
 #PBS -l walltime=12:00:00
-#PBS -o logs/snakemake_sweep.out
-#PBS -e logs/snakemake_sweep.err
+#PBS -o monomer_excl_logs/snakemake_sweep.out
+#PBS -e monomer_excl_logs/snakemake_sweep.err
 #PBS -m bea
 #PBS -M dwl25@imperial.ac.uk
 
@@ -15,8 +15,11 @@ conda activate snakemake
 
 echo "Running on node: $(hostname)"
 
+CORES=$(wc -l < $PBS_NODEFILE)
+SAFE_CORES=$((CORES / 2))
+
 snakemake -s multiparam_set.smk \
-    --cores all\
+    --cores $SAFE_CORES\
     --keep-going \
     --printshellcmds \
     --config exp=src/config/monomer_excl.yaml

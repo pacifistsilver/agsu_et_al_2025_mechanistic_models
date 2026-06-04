@@ -6,8 +6,8 @@ sys.path.append("src")
 
 # snakemake --cores all --snakefile multiparam_set.smk  --config exp=src/config/hetmer_excl.yaml
 
-NUM_SAMPLES = 1000
-sampler = qmc.LatinHypercube(d=2)
+NUM_SAMPLES = 100
+sampler = qmc.LatinHypercube(d=2, seed=42)
 sample = sampler.random(n=NUM_SAMPLES)
 sample_scaled = qmc.scale(sample, [0.01, 0.01], [1.0, 1.0])
 
