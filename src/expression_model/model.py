@@ -19,7 +19,7 @@ If you face any issues, email: dwl25@ic.ac.uk or danielluo1143@gmail.com
 import numpy as np
 import polars as pl
 import pandas as pd
-import src.expression_model.model_config as config
+import expression_model.config_default as config
 from typing import List
 from dataclasses import dataclass
 
