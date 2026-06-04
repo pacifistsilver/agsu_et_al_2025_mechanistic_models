@@ -1,0 +1,23 @@
+#!/bin/bash
+#PBS -N gene_sim_sweep
+#PBS -l select=1:ncpus=72:mem=120gb
+#PBS -l walltime=12:00:00
+#PBS -o logs/snakemake_sweep.out
+#PBS -e logs/snakemake_sweep.err
+#PBS -m bea
+#PBS -M dwl25@imperial.ac.uk
+
+cd $PBS_O_WORKDIR
+mkdir -p hodmer_excl_sub_logs
+module load miniforge/3
+eval "$(~/miniforge3/bin/conda shell.bash hook)"
+conda activate snakemake 
+
+echo "Running on node: $(hostname)"
+
+snakemake -s multiparam_set.smk \
+    --cores all\
+    --keep-going \
+    --printshellcmds \
+    --config exp=src/config/hodmer_excl.yaml
+

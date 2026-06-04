@@ -1,16 +1,25 @@
 import sys
 import numpy as np
+from scipy.stats import qmc
+
 sys.path.append("src")
 
 # snakemake --cores all --snakefile multiparam_set.smk  --config exp=src/config/hetmer_excl.yaml
+
+NUM_SAMPLES = 1000
+sampler = qmc.LatinHypercube(d=2)
+sample = sampler.random(n=NUM_SAMPLES)
+sample_scaled = qmc.scale(sample, [0.01, 0.01], [1.0, 1.0])
+
 configfile: config.get("exp", "src/config/default.yaml")
 OUTDIR = config.get("output_dir", "heterodimer")
 
-K_BIND_N_VALS_ALL = [f"{x:.2f}" for x in np.linspace(0.01, 1.0, num=100)]
-K_BIND_S_VALS_ALL = [f"{x:.2f}" for x in np.linspace(0.01, 1.0, num=100)]
+K_BIND_N_VALS_ALL = [f"{val[0]:.2f}" for val in sample_scaled]
+K_BIND_S_VALS_ALL = [f"{val[1]:.2f}" for val in sample_scaled]
 
-K_BIND_N_VALS_SUBSET = [f"{x:.2f}" for x in np.linspace(0.01, 1.0, num=10)]
-K_BIND_S_VALS_SUBSET = [f"{x:.2f}" for x in np.linspace(0.01, 1.0, num=10)]
+SUBSET_SIZE = 25  # Generate Fano/MFPT histograms for the first 25 samples
+K_BIND_N_VALS_SUBSET = K_BIND_N_VALS_ALL[:SUBSET_SIZE]
+K_BIND_S_VALS_SUBSET = K_BIND_S_VALS_ALL[:SUBSET_SIZE]
 
 rule all:
     input:
@@ -23,15 +32,14 @@ rule simulate:
     params:
         kbn="{kbn}",
         kbs="{kbs}",
-        outdir=OUTDIR,  # Pass the dynamic directory to the script
+        outdir=OUTDIR,  
         config_path=config.get("exp", "src/config/default.yaml")
-    threads: 12
     script:
         "scripts/run_sim_sweep.py"
 
 rule compile_stats:
     input:
-        expand(f"{OUTDIR}/sweep/kbn_{{kbn}}_kbs_{{kbs}}/simulation.done", kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL)
+        expand(f"{OUTDIR}/sweep/kbn_{{kbn}}_kbs_{{kbs}}/simulation.done", zip, kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL)
     output:
         f"{OUTDIR}/compiled_sweep_stats.parquet"
     script:
@@ -40,7 +48,7 @@ rule compile_stats:
 rule plot_results:
     input:
         stats=f"{OUTDIR}/compiled_sweep_stats.parquet",
-        dones=expand(f"{OUTDIR}/sweep/kbn_{{kbn}}_kbs_{{kbs}}/simulation.done", kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL)
+        dones=expand(f"{OUTDIR}/sweep/kbn_{{kbn}}_kbs_{{kbs}}/simulation.done", zip, kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL)
     output:
         hue=f"{OUTDIR}/plots/mean_residence_time_hue.png",
         # Snakemake will only expect the 200 subset images

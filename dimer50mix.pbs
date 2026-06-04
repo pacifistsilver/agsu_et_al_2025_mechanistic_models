@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N gene_sim_sweep
-#PBS -l select=1:ncpus=32:mem=64gb
+#PBS -l select=1:ncpus=72:mem=120gb
 #PBS -l walltime=12:00:00
 #PBS -o logs/snakemake_sweep.out
 #PBS -e logs/snakemake_sweep.err
@@ -8,19 +8,16 @@
 #PBS -M dwl25@imperial.ac.uk
 
 cd $PBS_O_WORKDIR
-mkdir -p logs
+mkdir -p dimer_50mix_logs
 module load miniforge/3
 eval "$(~/miniforge3/bin/conda shell.bash hook)"
 conda activate snakemake 
 
-CORES=$(wc -l < $PBS_NODEFILE)
-echo "Starting Snakemake pipeline on $CORES cores..."
 echo "Running on node: $(hostname)"
 
-# 5. Execute Snakemake
 snakemake -s multiparam_set.smk \
-    --cores $CORES \
+    --cores all\
     --keep-going \
     --printshellcmds \
-    --snakefile multiparam_set.smk \
-    --config exp=src/config/hetmer_excl.yaml
+    --config exp=src/config/dimer_50mix.yaml
+
