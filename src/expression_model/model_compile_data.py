@@ -3,7 +3,7 @@ import glob
 import json
 import polars as pl
 from src.expression_model.model_stats import Statistics
-import src.expression_model.model_config as config
+import expression_model.config_default as config
 
 def parse_parameters_txt(filepath):
     """Extracts the dictionaries from the saved text file."""

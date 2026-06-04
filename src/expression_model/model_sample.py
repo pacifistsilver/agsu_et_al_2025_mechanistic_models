@@ -14,7 +14,7 @@ import json
 import polars as pl
 import concurrent.futures
 import numpy as np
-import src.expression_model.model_config as config
+import expression_model.config_default as config
 from scipy.stats import qmc
 from src.expression_model.model import ModelCall, TranscriptionFactor
 
