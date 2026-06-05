@@ -8,7 +8,7 @@ sys.path.append("src")
 
 NUM_SAMPLES = 100
 sampler = qmc.LatinHypercube(d=2, seed=42)
-sample = sampler.random(n=NUM_SAMPLES)
+sample =  sampler.random(n=NUM_SAMPLES)
 sample_scaled = qmc.scale(sample, [0.01, 0.01], [1.0, 1.0])
 
 configfile: config.get("exp", "src/config/default.yaml")
@@ -52,12 +52,12 @@ rule plot_results:
     output:
         hue=f"{OUTDIR}/plots/mean_residence_time_hue.png",
         # Snakemake will only expect the 200 subset images
-        fano_hists=expand(f"{OUTDIR}/plots/fano_hist_kbn_{{kbn}}_kbs_{{kbs}}.png", kbn=K_BIND_N_VALS_SUBSET, kbs=K_BIND_S_VALS_SUBSET),
-        mfpt_hists=expand(f"{OUTDIR}/plots/mfpt_hist_kbn_{{kbn}}_kbs_{{kbs}}.png", kbn=K_BIND_N_VALS_SUBSET, kbs=K_BIND_S_VALS_SUBSET)
+        fano_hists=expand(f"{OUTDIR}/plots/fano_hist_kbn_{{kbn}}_kbs_{{kbs}}.png", kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL),
+        mfpt_hists=expand(f"{OUTDIR}/plots/mfpt_hist_kbn_{{kbn}}_kbs_{{kbs}}.png", kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL)
     params:
         # Pass ONLY the subset lists to the plotting script!
-        kbn_vals=K_BIND_N_VALS_SUBSET,
-        kbs_vals=K_BIND_S_VALS_SUBSET,
+        kbn_vals=K_BIND_N_VALS_ALL,
+        kbs_vals=K_BIND_S_VALS_ALL,
         outdir=OUTDIR
     script:
         "scripts/plot_data.py"
