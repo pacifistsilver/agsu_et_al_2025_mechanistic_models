@@ -2,10 +2,8 @@
 #PBS -N hodmer_excl
 #PBS -l select=1:ncpus=64:mem=800gb
 #PBS -l walltime=2:00:00
-#PBS -o hodmer_excl_sub_logs/{$JOB_ID}_snakemake.out
-#PBS -e hodmer_excl_sub_logs/{$JOB_ID}_snakemake.err
 #PBS -M dwl25@imperial.ac.uk
-
+set -euo pipefail
 cd $PBS_O_WORKDIR
 mkdir -p hodmer_excl_sub_logs
 module load miniforge/3
@@ -14,11 +12,8 @@ conda activate snakemake
 
 echo "Running on node: $(hostname)"
 
-
-
-
 snakemake -s multiparam_set.smk \
-    --cores all\
+    --cores $NCPUS\
     --keep-going \
     --printshellcmds \
     --config exp=src/config/hodmer_excl.yaml
