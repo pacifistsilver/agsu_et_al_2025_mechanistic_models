@@ -4,7 +4,7 @@
 #PBS -l walltime=2:00:00
 #PBS -M dwl25@imperial.ac.uk
 set -euo pipefail
-
+smk_file_dir=scripts/smk/multiparam_set.smk
 cd $PBS_O_WORKDIR
 mkdir -p dimer_10mix_logs
 module load miniforge/3
@@ -13,7 +13,7 @@ conda activate snakemake
 
 echo "Running on node: $(hostname)"
 
-snakemake -s multiparam_set.smk \
+snakemake -s $smk_file_dir \
     --cores $NCPUS \
     --keep-going \
     --printshellcmds \
