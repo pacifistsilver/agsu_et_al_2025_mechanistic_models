@@ -62,17 +62,3 @@ class HeterodimerModel:
         return (1 / self.beta_s) * (1 + (numerator / denominator))
 
 
-a_n = 0.1
-a_s = 1
-b_n = 0.2
-b_s = 0.06
-
-
-x = HeterodimerModel(a_s, b_s, a_n, b_n)
-print(x.P_bound(), x.P_n1(), x.P_s1(), x.P_bound()/x.P_s1())
-# nanogb, sox2b, sox2b:nanogb
-print(x.T_01(), x.T_10(), x.T_11())
-# average MFPT weighted by probability of occupying each state
-print(x.T_bound())
-# lifetime of heterodimer mainly sox2 bound assuming sox2 stronger than nanog
-print(x.Ts1())
