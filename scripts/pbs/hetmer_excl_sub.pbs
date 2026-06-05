@@ -1,10 +1,9 @@
 #!/bin/bash
-#PBS -N gene_sim_sweep
-#PBS -l select=1:ncpus=72:mem=120gb
-#PBS -l walltime=12:00:00
-#PBS -o hetmer_excl_logs/snakemake_sweep.out
-#PBS -e hetmer_excl_logs/snakemake_sweep.err
-#PBS -m bea
+#PBS -N hetmer_excl
+#PBS -l select=1:ncpus=64:mem=800gb
+#PBS -l walltime=2:00:00
+#PBS -o hetmer_excl_logs/{$JOB_ID}_snakemake.out
+#PBS -e hetmer_excl_logs/{$JOB_ID}_snakemake.err
 #PBS -M dwl25@imperial.ac.uk
 
 cd $PBS_O_WORKDIR
@@ -14,11 +13,11 @@ eval "$(~/miniforge3/bin/conda shell.bash hook)"
 conda activate snakemake 
 echo "Running on node: $(hostname)"
 
-CORES=$(wc -l < $PBS_NODEFILE)
-SAFE_CORES=$((CORES / 2))
+
+
 
 snakemake -s multiparam_set.smk \
-    --cores $SAFE_CORES\
+    --cores all\
     --keep-going \
     --printshellcmds \
     --config exp=src/config/hetmer_excl.yaml
