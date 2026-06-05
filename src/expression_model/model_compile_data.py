@@ -2,7 +2,7 @@ import os
 import glob
 import json
 import polars as pl
-from src.expression_model.model_stats import Statistics
+from expression_model.model_stats import Statistics
 import expression_model.config_default as config
 
 def parse_parameters_txt(filepath):

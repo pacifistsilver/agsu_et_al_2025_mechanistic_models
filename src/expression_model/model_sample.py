@@ -16,7 +16,7 @@ import concurrent.futures
 import numpy as np
 import expression_model.config_default as config
 from scipy.stats import qmc
-from src.expression_model.model import ModelCall, TranscriptionFactor
+from expression_model.model import ModelCall, TranscriptionFactor
 
 
 output = config.out_dir
@@ -163,7 +163,6 @@ def generate_lhs_and_run(
             df_final.write_parquet(save_path)
             print(f"Successfully saved aggregated data to {save_path}")
 
-
 def run_single_parameter_set(
     sim_max_time: int,
     model_binding_sites: int,
@@ -171,12 +170,11 @@ def run_single_parameter_set(
     param_set_id: str = "",
     custom_rates: dict = None,
     custom_initial_state: dict = None,
-    output_dir: str = "output"   # <--- 1. NEW ARGUMENT ADDED
+    output_dir: str = "output"  
 ):
     """
     Runs multiple stochastic trajectories for a given parameter/variable set.
     """
-    # 1. Setup specific parameters for this run
     run_rates = config.model_param.copy()
     if custom_rates:
         run_rates.update(custom_rates)
@@ -192,7 +190,6 @@ def run_single_parameter_set(
     meta.update(model_var)
     df_meta = pl.DataFrame([meta])
     
-    # 2. FIXED FOLDER CREATION (Uses dynamic output_dir & removes "param_set_")
     param_set_dir = os.path.join(output_dir, str(param_set_id))
     os.makedirs(os.path.join(param_set_dir, "states"), exist_ok=True)
     os.makedirs(os.path.join(param_set_dir, "dwell_times"), exist_ok=True)
@@ -245,16 +242,12 @@ def run_single_parameter_set(
 
         df_final = df_meta.join(df_summary, on="param_set_id")
 
-        # 3. FIXED SAVE PATH LOGIC
         save_path = os.path.join(output_dir, f"{param_set_id}_summary_results.parquet")
         
-        # CRITICAL: If param_set_id has a slash (e.g., "sweep/kbn..."), 
-        # we must guarantee the parent folder exists before saving the parquet!
         os.makedirs(os.path.dirname(save_path), exist_ok=True) 
         
         df_final.write_parquet(save_path)
-        print(f"Successfully saved aggregated data to {save_path}")
-        
+        print(f"Successfully saved aggregated data to {save_path}")      
 
 def execute_simulation(run_id: int, param_set: dict) -> dict:
     """Purely runs the math and returns raw data in memory."""
@@ -288,43 +281,3 @@ def save_simulation_data(sim_data: dict, output_dir: str):
     sim_data["dwell"].write_parquet(f"{output_dir}/dwell_times/run_{run_id}.parquet")
     # ...
 
-
-if __name__ == "__main__":
-
-    model_var = {
-        "sox2_monomer_free": 0,
-        "nanog_monomer_free": 0,
-        "sox2_monomer_bound": 0,
-        "nanog_monomer_bound": 0,
-        "nanog_sox2_dimer_bound": 0,
-        "nanog_nanog_dimer_bound": 0,
-        "nanog_sox2_dimer_free": 1,
-        "nanog_nanog_dimer_free": 0,
-        "nanog_sox2_dimer_single_bound": 0,
-        "nanog_nanog_dimer_single_bound": 0,
-        "mRNA": 0,
-    }
-
-    model_param = {
-        "k_s_in": 0,
-        "k_s_out": 0,
-        "k_n_in": 0,
-        "k_in_out": 0,
-        "k_bind_s": 1.0,
-        "k_unbind_s": 0.06,
-        "k_bind_n": 1.0,
-        "k_unbind_n": 0.2,
-        "k_dimerise": 0,
-        "k_prod_m": 1.0,
-        "k_deg_m": 0.53,
-        "k_dissociate": 0,
-    }
-
-    run_single_parameter_set(
-        sim_max_time=1000,
-        model_binding_sites=10,
-        runs=100,
-        custom_initial_state=model_var,
-        custom_rates=model_param,
-        param_set_id="WT_NANOG_TEST",
-    )
