@@ -2,8 +2,8 @@ import os
 import polars as pl
 import pandas as pd
 
-from expression_model.model_compile_data import _return_all_mfpt_trajectories
-from expression_model.plotting_utils import (
+from compile_data import _return_all_mfpt_trajectories
+from plotting_utils import (
     plot_mfpt_scatter,
     plot_fano_histogram,
     plot_mfpt_histogram,

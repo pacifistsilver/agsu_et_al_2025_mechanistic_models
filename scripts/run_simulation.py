@@ -1,6 +1,6 @@
 import yaml
-from src.expression_model.model_sample import run_single_parameter_set
-from src.expression_model.config_default import model_param, model_var
+from sample_model import run_single_parameter_set
+from config_default import model_param, model_var
 
 if __name__ == "__main__":
     with open(snakemake.params.config_path, 'r') as f:

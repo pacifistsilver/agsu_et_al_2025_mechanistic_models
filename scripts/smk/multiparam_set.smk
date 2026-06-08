@@ -4,7 +4,7 @@ from scipy.stats import qmc
 
 sys.path.append("src")
 
-# snakemake --cores all --snakefile multiparam_set.smk  --config exp=src/config/hetmer_excl.yaml
+# snakemake --cores all --d --s multiparam_set.smk  --config exp=src/config/hetmer_excl.yaml
 
 NUM_SAMPLES = 100
 sampler = qmc.LatinHypercube(d=2, seed=42)
@@ -35,7 +35,7 @@ rule simulate:
         outdir=OUTDIR,  
         config_path=config.get("exp", "src/config/default.yaml")
     script:
-        "scripts/run_sim_sweep.py"
+        "run_sim_sweep.py"
 
 rule compile_stats:
     input:

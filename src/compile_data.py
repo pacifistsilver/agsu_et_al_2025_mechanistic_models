@@ -2,8 +2,8 @@ import os
 import glob
 import json
 import polars as pl
-from expression_model.model_stats import Statistics
-import expression_model.config_default as config
+from eda_functions import Statistics
+import config_default as config
 
 def parse_parameters_txt(filepath):
     """Extracts the dictionaries from the saved text file."""

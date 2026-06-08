@@ -43,7 +43,7 @@ docker pull pacifistsilver/stochresidence:0.1
 
 2. Run the container
 ```
-docker run -it -v $(pwd):/app pacifistsilver/stochresidence:0.1 /bin/bash
+docker run -it -v $(pwd):/app pacifistsilver/stochresidence:0.1 
 ```
 
 

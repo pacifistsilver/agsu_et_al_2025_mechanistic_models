@@ -12,16 +12,16 @@ Key modules:
 - plotting_utils: Shared plotting utilities and visualization functions
 """
 
-from . import constants
+from .expression_model import constants
 from .model import ModelCall, ModelState, TranscriptionFactor, ModelLogger, ModelReactions
-from .model_sample import (
+from .sample_model import (
     run_single_parameter_set,
     execute_simulation,
     run_and_save_trajectory,
     generate_lhs_and_run,
 )
-from .model_stats import Statistics
-from .model_compile_data import compile_all_runs, _return_all_mfpt_trajectories, parse_parameters_txt
+from .eda_functions import Statistics
+from .compile_data import compile_all_runs, _return_all_mfpt_trajectories, parse_parameters_txt
 from .config_loader import (
     load_yaml_config,
     merge_with_defaults,

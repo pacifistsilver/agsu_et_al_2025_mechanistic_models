@@ -1,7 +1,7 @@
 import os
 import json
 import polars as pl
-from expression_model.model_stats import Statistics
+from eda_functions import Statistics
 
 if __name__ == "__main__":
     all_run_features = []

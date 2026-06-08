@@ -421,7 +421,7 @@ def plot_mfpt_comparison(
         label1: Label for first condition
         label2: Label for second condition
     """
-    from .model_compile_data import _return_all_mfpt_trajectories
+    from .compile_data import _return_all_mfpt_trajectories
     import polars as pl
 
     palette = get_species_palette()
