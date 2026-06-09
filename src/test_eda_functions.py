@@ -1,9 +1,7 @@
 import pytest
 import pandas as pd
 
-# ---------------------------------------------------------
-# Dummy class to hold your method for testing
-# ---------------------------------------------------------
+
 class TrajectoryTracker:
     def _track_run_trajectories(self, run_id, run_data):
         """Scans a single run to track individual molecules across sites using paired_site links."""

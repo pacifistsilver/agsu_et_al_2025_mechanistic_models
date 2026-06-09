@@ -1,4 +1,4 @@
-"""Tests for model.py
+"""Tests for model files
 
 In more detail, we test for:
     1. Chromatin arrays and dictionaries are initialised correctly.
@@ -11,7 +11,10 @@ In more detail, we test for:
 
 import pytest
 import numpy as np
-from model import TranscriptionFactor, ModelState, ModelCall
+from .model_utils import TranscriptionFactor
+from .model_state import ModelState
+from .model_call import ModelCall
+
 
 ## initialise model
 @pytest.fixture

@@ -16,7 +16,8 @@ import concurrent.futures
 import numpy as np
 import config_default as config
 from scipy.stats import qmc
-from model import ModelCall, TranscriptionFactor
+from .model_call import ModelCall
+from .model_utils import TranscriptionFactor
 
 
 output = config.out_dir

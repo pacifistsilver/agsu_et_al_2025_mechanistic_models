@@ -1,5 +1,5 @@
 """
-Centralized configuration loading and merging utilities.
+Centralised configuration loading and merging utilities.
 
 This module provides functions to load YAML config files and merge them with
 default values, avoiding code duplication across scripts.
@@ -9,8 +9,7 @@ import yaml
 from pathlib import Path
 from typing import Dict, Tuple, Optional
 
-from . import constants
-
+import constants
 
 def load_yaml_config(config_path: str) -> Dict[str, any]:
     """

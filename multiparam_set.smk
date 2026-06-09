@@ -4,9 +4,9 @@ from scipy.stats import qmc
 
 sys.path.append("src")
 
-# snakemake --cores all --d --s multiparam_set.smk  --config exp=src/config/hetmer_excl.yaml
+# snakemake --cores all -s multiparam_set.smk  --config exp=src/config/hetmer_excl.yaml
 
-NUM_SAMPLES = 100
+NUM_SAMPLES = 1
 sampler = qmc.LatinHypercube(d=2, seed=42)
 sample =  sampler.random(n=NUM_SAMPLES)
 sample_scaled = qmc.scale(sample, [0.01, 0.01], [1.0, 1.0])
@@ -35,7 +35,7 @@ rule simulate:
         outdir=OUTDIR,  
         config_path=config.get("exp", "src/config/default.yaml")
     script:
-        "run_sim_sweep.py"
+        "scripts/run_sim_sweep.py"
 
 rule compile_stats:
     input:
@@ -51,11 +51,9 @@ rule plot_results:
         dones=expand(f"{OUTDIR}/sweep/kbn_{{kbn}}_kbs_{{kbs}}/simulation.done", zip, kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL)
     output:
         hue=f"{OUTDIR}/plots/mean_residence_time_hue.png",
-        # Snakemake will only expect the 200 subset images
         fano_hists=expand(f"{OUTDIR}/plots/fano_hist_kbn_{{kbn}}_kbs_{{kbs}}.png", kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL),
         mfpt_hists=expand(f"{OUTDIR}/plots/mfpt_hist_kbn_{{kbn}}_kbs_{{kbs}}.png", kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL)
     params:
-        # Pass ONLY the subset lists to the plotting script!
         kbn_vals=K_BIND_N_VALS_ALL,
         kbs_vals=K_BIND_S_VALS_ALL,
         outdir=OUTDIR

@@ -1,5 +1,5 @@
 from config_loader import load_yaml_config, merge_with_defaults, get_sim_parameters
-from sample_model import run_single_parameter_set
+from src.sample_model import run_single_parameter_set
 
 if __name__ == "__main__":
     kbn = float(snakemake.params.kbn)

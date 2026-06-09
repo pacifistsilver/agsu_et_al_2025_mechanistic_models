@@ -7,10 +7,9 @@
 
 ## repo structure
 ```text
-├── notebooks/             # Jupyter notebooks for data exploration
-├── scripts/               # Snakemake helper scripts 
-├── src/
-│   └── expression_model/  # modules for the stochastic model
+├── notebooks/             
+├── scripts/               
+├── src/  
 ├── Dockerfile             
 ├── Snakefile.smk          
 ├── environment.yaml       
@@ -24,10 +23,10 @@
 ### Option 1: Build local Docker container
 1. Clone the repository:
 ```bash
-   git clone [https://github.com/pacifistsilver/Srinjan_Modelling.git](https://github.com/pacifistsilver/Srinjan_Modelling.git)
-   cd Srinjan_Modelling
+   git clone [https://github.com/pacifistsilver/1d-spatial-gillespie.git](https://github.com/pacifistsilver/1d-spatial-gillespie.git)
+   cd 1d-spatial-gillespie
 ```
-2. Build w/ Docker
+2. Build with Docker
 ```
 docker build -t srinjan_modelling:latest .
 ```

@@ -5,7 +5,6 @@ This module serves as the single source of truth for all constants used across
 the project.
 """
 
-
 SPECIES_NAMES = [
     "sox2_monomer_free",
     "nanog_monomer_free",
