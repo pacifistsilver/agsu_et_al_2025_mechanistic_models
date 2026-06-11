@@ -111,7 +111,11 @@ class ModelState:
         return constants.STATE_STRINGS[self.chromatin_state[site]]
 
     def update_site_weights(self, site):
-        """Update spatial weight matrices to decide dimerisation partners."""
+        """_summary_ Update spatial weight matrices to decide dimerisation and tethering partners.
+        
+        Args:
+            site (int): index of the site to update.
+        """
         from .constants import SiteState
         old_dimer_row_sum = np.sum(self.dimer_weight_matrix[site, :])
         new_dimer_row = np.zeros(self.total_sites)
@@ -170,6 +174,14 @@ class ModelState:
         self.total_tether_weight_s = np.sum(self.tether_weight_s)
         self.total_tether_weight_n = np.sum(self.tether_weight_n)
     def get_base_tf(self, state: int) -> int:
+        """_summary_ Helper function returning the base bound tf of a given site state.
+
+        Args:
+            state (int): integer state representing chromatin site occupancy.
+
+        Returns:
+            int: 1 for SOX2, 2 for NANOG, 0 for empty.
+        """
         from .constants import SiteState
         if state in (SiteState.SOX2b, SiteState.SOX2b_NANOGf, SiteState.SOX2b_NANOGb):
             return 1
@@ -178,6 +190,13 @@ class ModelState:
         return 0
 
     def set_site_state(self, site: int, new_state: int, new_partner: int = -1):
+        """_summary_ Safely sets site state and manages all underlying index tracker arrays to maintain performance O(1).
+        
+        Args:
+            site (int): chromatin site index.
+            new_state (int): integer state to transition to.
+            new_partner (int, optional): index of newly bound partner. Defaults to -1.
+        """
         from .constants import SiteState
         old_state = self.chromatin_state[site]
         old_partner = self.chromatin_partner_site[site]
@@ -239,6 +258,11 @@ class ModelState:
         self.update_site_weights(site)
 
     def is_promoter_active(self) -> bool:
+        """_summary_ Checks if the designated promoter site is bound by an activating tf.
+
+        Returns:
+            bool: True if promoter is active, False otherwise.
+        """
         from .constants import SiteState
         p_site = self.promoter_site
         p_state = self.chromatin_state[p_site]

@@ -53,8 +53,13 @@ class ModelCall:
             total_binding_sites=model_binding_sites,
             initial_species_states=model_var,
         )
+        
+        self.observers = []
+        
         self.logger = ModelLogger(self.state)
-        self.reactions = ModelReactions(self.state, self.logger)
+        self.add_observer(self.logger)
+        
+        self.reactions = ModelReactions(self.state)
 
         self.stoichiometry_matrix = np.zeros(
             (len(self.state.species_names), len(self.state.reaction_names)), dtype=np.int32
@@ -68,8 +73,32 @@ class ModelCall:
 
         self._propensities = np.zeros(16, dtype=np.float64)
 
+    def add_observer(self, observer):
+        """_summary_ Adds an observer to the simulation's event stream."""
+        self.observers.append(observer)
+
+    def notify_snapshot(self, current_t):
+        """_summary_ Emits a state snapshot event to all observers."""
+        for obs in self.observers:
+            obs.on_snapshot(current_t, self.state)
+
+    def notify_reaction(self, current_t, reaction_index, primary_site=-1, secondary_site=-1):
+        """_summary_ Emits a reaction fired event to all observers."""
+        for obs in self.observers:
+            obs.on_reaction_fired(current_t, reaction_index, primary_site, secondary_site)
+
+    def notify_site_state_changed(self, current_t, site, old_species, new_species, reaction_name, duration, paired_site=-1, is_bound=True):
+        """_summary_ Emits a site state change event for residence time logging."""
+        for obs in self.observers:
+            obs.on_site_state_changed(current_t, site, old_species, new_species, reaction_name, duration, paired_site, is_bound)
+
     def _calculate_propensities(self):
-        """Calculates current reaction propensities based on the system state."""
+        """_summary_ Calculates current reaction propensities based on the system state.
+        
+        Returns:
+            propensities (numpy.ndarray): updated array of reaction propensities.
+            total_propensity (float): sum of all propensities.
+        """
         c = self.state.species_counts
 
         s_free = c[self.state.species_map["sox2_monomer_free"]]
@@ -77,12 +106,14 @@ class ModelCall:
         ns_free = c[self.state.species_map["nanog_sox2_dimer_free"]]
         nn_free = c[self.state.species_map["nanog_nanog_dimer_free"]]
 
+        # calculate bulk dimer counts
         bulk_nn = n_free * (n_free - 1) / 2.0
         bulk_sn = s_free * n_free
 
         len_undimered_s = self.state.undimered_count[1]
         len_undimered_n = self.state.undimered_count[2]
 
+        # bulk dimerisation with site bound monomers
         site_bulk = (
             (len_undimered_s * n_free)
             + (len_undimered_n * s_free)
@@ -91,8 +122,10 @@ class ModelCall:
 
         promoter_on = self.state.is_promoter_active()
 
+        # dangling arms for dedimerisation
         total_dangling = self.state.dangling_counts[1] + self.state.dangling_counts[2]
 
+        # update all reaction propensities
         self._propensities[0] = self.rates.get("k_s_in", 0.0)
         self._propensities[1] = self.rates.get("k_n_in", 0.0)
         self._propensities[2] = self.rates.get("k_bind_s", 0.0) * (((s_free + ns_free) * self.state.vacant_count) + self.state.total_tether_weight_s)
@@ -128,15 +161,19 @@ class ModelCall:
         """
         current_t = 0.0
 
+        # initial propensities
         propensities, total_prop = self._calculate_propensities()
         num_rxns = len(propensities)
         
+        # generate initial putative times for all reactions
         tau = np.full(num_rxns, np.inf)
         for i in range(num_rxns):
             if propensities[i] > 0:
                 tau[i] = (1.0 / propensities[i]) * np.log(1.0 / np.random.rand())
 
+        # nrm loop
         while current_t < self.max_time:
+            # find next reaction
             reaction_index = np.argmin(tau)
             min_tau = tau[reaction_index]
 
@@ -145,13 +182,17 @@ class ModelCall:
 
             current_t = min_tau
 
-            self.logger.record_snapshot(current_t)
+            self.notify_snapshot(current_t)
             
+            # execute reaction and update state
             self.state.species_counts += self.stoichiometry_matrix[:, reaction_index]
-            self.reactions.execute(current_t, reaction_index)
+            p_site, s_site = self.reactions.execute(current_t, reaction_index)
+            self.notify_reaction(current_t, reaction_index, p_site, s_site)
 
+            # recalculate propensities
             new_propensities, _ = self._calculate_propensities()
 
+            # update tau according to next reaction method (nrm) rules
             for i in range(num_rxns):
                 a_old = propensities[i]
                 a_new = new_propensities[i]

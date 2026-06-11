@@ -16,7 +16,7 @@ class ModelLogger:
         self.partner_states = []
         self.reaction_history, self.residence_time_states = [], []
 
-    def record_reaction(
+    def on_reaction_fired(
         self, current_t, reaction_index, primary_site=-1, secondary_site=-1
     ):
         reaction_name = (
@@ -28,11 +28,35 @@ class ModelLogger:
             (current_t, reaction_name, primary_site, secondary_site)
         )
 
-    def record_snapshot(self, current_t):
+    def on_snapshot(self, current_t, state):
         self.times.append(current_t)
-        self.bulk_states.append(self.state.species_counts.copy())
-        self.spatial_states.append(self.state.chromatin_state.copy())
-        self.partner_states.append(self.state.chromatin_partner_site.copy())
+        self.bulk_states.append(state.species_counts.copy())
+        self.spatial_states.append(state.chromatin_state.copy())
+        self.partner_states.append(state.chromatin_partner_site.copy())
+
+    def on_site_state_changed(
+        self,
+        current_sim_time,
+        site,
+        old_species_label,
+        new_species_label,
+        reaction_name,
+        duration,
+        paired_site=-1,
+        is_bound=True,
+    ):
+        self.residence_time_states.append(
+            [
+                duration,
+                current_sim_time,
+                site,
+                paired_site,
+                old_species_label,
+                new_species_label,
+                reaction_name,
+                is_bound,
+            ]
+        )
 
     def generate_dataframes(self, final_t):
         """Outputs three dataframes containing simulation data.
