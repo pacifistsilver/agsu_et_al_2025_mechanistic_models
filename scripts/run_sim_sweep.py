@@ -1,4 +1,8 @@
-from config_loader import load_yaml_config, merge_with_defaults, get_sim_parameters
+import sys
+import os
+sys.path.insert(0, os.path.abspath("."))
+
+from src.config_loader import load_yaml_config, merge_with_defaults, get_sim_parameters
 from src.sample_model import run_single_parameter_set
 
 if __name__ == "__main__":
@@ -10,7 +14,6 @@ if __name__ == "__main__":
 
     cfg = load_yaml_config(snakemake.params.config_path)
 
-    # Merge defaults with config, then override with sweep parameters
     final_rates, final_state = merge_with_defaults(
         cfg,
         custom_rates={"k_bind_n": kbn, "k_bind_s": kbs},
@@ -25,8 +28,7 @@ if __name__ == "__main__":
         custom_rates=final_rates,
         custom_initial_state=final_state,
         param_set_id=param_set_id,
-        output_dir=base_outdir
+        output_dir=base_outdir,
+        max_workers=snakemake.threads,
+        activator_tf=cfg.get("activator_tf", "sox2")
     )
-
-    with open(snakemake.output.done, 'w') as f:
-        f.write("Done.")
