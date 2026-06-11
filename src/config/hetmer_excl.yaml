@@ -1,6 +1,6 @@
 experiment_name: "heterodimer_only"
 sim_time: 1000
-runs: 100
+num_samples: 2
 rates:
   k_bind_s: 1.0
   k_unbind_s: 0.06
@@ -11,3 +11,4 @@ rates:
 initial_state:
   nanog_sox2_dimer_free: 1
 output_dir: "hetmer_excl"
+activator_tf: "sox2" # Valid options are: "sox2", "nanog", or "both"
