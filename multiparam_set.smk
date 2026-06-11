@@ -6,56 +6,59 @@ sys.path.append("src")
 
 # snakemake --cores all -s multiparam_set.smk  --config exp=src/config/hetmer_excl.yaml
 
-NUM_SAMPLES = 1
-sampler = qmc.LatinHypercube(d=2, seed=42)
-sample =  sampler.random(n=NUM_SAMPLES)
-sample_scaled = qmc.scale(sample, [0.01, 0.01], [1.0, 1.0])
+configfile: config.get("exp", "src/config/hetmer_excl.yaml")
 
-configfile: config.get("exp", "src/config/default.yaml")
+NUM_SAMPLES = config.get("num_samples", 1)
+SUBSET_SIZE = config.get("subset_size", 25)
 OUTDIR = config.get("output_dir", "heterodimer")
+
+sampler = qmc.LatinHypercube(d=2, seed=42)
+sample = sampler.random(n=NUM_SAMPLES)
+sample_scaled = qmc.scale(sample, [0.01, 0.01], [1.0, 1.0])
 
 K_BIND_N_VALS_ALL = [f"{val[0]:.2f}" for val in sample_scaled]
 K_BIND_S_VALS_ALL = [f"{val[1]:.2f}" for val in sample_scaled]
 
-SUBSET_SIZE = 25  # Generate Fano/MFPT histograms for the first 25 samples
 K_BIND_N_VALS_SUBSET = K_BIND_N_VALS_ALL[:SUBSET_SIZE]
 K_BIND_S_VALS_SUBSET = K_BIND_S_VALS_ALL[:SUBSET_SIZE]
 
 rule all:
     input:
-        f"{OUTDIR}/plots/mean_residence_time_hue.png",
-        expand(f"{OUTDIR}/plots/fano_hist_kbn_{{kbn}}_kbs_{{kbs}}.png", kbn=K_BIND_N_VALS_SUBSET, kbs=K_BIND_S_VALS_SUBSET),
-        expand(f"{OUTDIR}/plots/mfpt_hist_kbn_{{kbn}}_kbs_{{kbs}}.png", kbn=K_BIND_N_VALS_SUBSET, kbs=K_BIND_S_VALS_SUBSET)
+        f"{OUTDIR}/plots/mean_residence_time_hue.png"
+
 rule simulate:
     output:
-        done=f"{OUTDIR}/sweep/kbn_{{kbn}}_kbs_{{kbs}}/simulation.done"
+        sweep_dir=directory(f"{OUTDIR}/sweep/kbn_{{kbn}}_kbs_{{kbs}}")
     params:
         kbn="{kbn}",
         kbs="{kbs}",
         outdir=OUTDIR,  
-        config_path=config.get("exp", "src/config/default.yaml")
+        config_path=config.get("exp", "src/config/hetmer_excl.yaml")
+    threads: 8
+    log:
+        f"{OUTDIR}/logs/simulate/kbn_{{kbn}}_kbs_{{kbs}}.log"
     script:
         "scripts/run_sim_sweep.py"
 
 rule compile_stats:
     input:
-        expand(f"{OUTDIR}/sweep/kbn_{{kbn}}_kbs_{{kbs}}/simulation.done", zip, kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL)
+        sweep_dirs=expand(f"{OUTDIR}/sweep/kbn_{{kbn}}_kbs_{{kbs}}", zip, kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL)
     output:
         f"{OUTDIR}/compiled_sweep_stats.parquet"
+    log:
+        f"{OUTDIR}/logs/compile_stats.log"
     script:
         "scripts/compile_data_sweep.py"
 
 rule plot_results:
     input:
         stats=f"{OUTDIR}/compiled_sweep_stats.parquet",
-        dones=expand(f"{OUTDIR}/sweep/kbn_{{kbn}}_kbs_{{kbs}}/simulation.done", zip, kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL)
+        sweep_dirs=expand(f"{OUTDIR}/sweep/kbn_{{kbn}}_kbs_{{kbs}}", zip, kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL)
     output:
-        hue=f"{OUTDIR}/plots/mean_residence_time_hue.png",
-        fano_hists=expand(f"{OUTDIR}/plots/fano_hist_kbn_{{kbn}}_kbs_{{kbs}}.png", kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL),
-        mfpt_hists=expand(f"{OUTDIR}/plots/mfpt_hist_kbn_{{kbn}}_kbs_{{kbs}}.png", kbn=K_BIND_N_VALS_ALL, kbs=K_BIND_S_VALS_ALL)
+        hue=f"{OUTDIR}/plots/mean_residence_time_hue.png"
     params:
-        kbn_vals=K_BIND_N_VALS_ALL,
-        kbs_vals=K_BIND_S_VALS_ALL,
         outdir=OUTDIR
+    log:
+        f"{OUTDIR}/logs/plot_results.log"
     script:
         "scripts/plot_data.py"

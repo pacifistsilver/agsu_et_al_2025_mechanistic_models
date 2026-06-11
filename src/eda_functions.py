@@ -96,10 +96,79 @@ class Statistics():
         df_tidy = df_tidy.drop(["bound_lifespan_s", "multistep"])
         
         return df_tidy.lazy()
-    def _return_mean_trajectories(self):
-        """Converts the dwell log to pandas to chronologically track sliding molecules."""
-        df = self.dwell_times_log.collect().to_pandas()
+
+    def _calc_binding_frequencies_per_site(self):
+        """Calculates the mean number of direct binding events per site across all runs."""
+        # Get total number of runs by finding unique run_ids
+        total_runs_df = self.df_states_log.select("run_id").unique().collect()
+        total_runs = total_runs_df.shape[0]
+        if total_runs == 0:
+            return pl.LazyFrame(schema={"dwell_site": pl.Int32, "mean_binding_events_per_run": pl.Float64})
+            
+        # Filter for bindings from solution
+        bindings = self.dwell_times_log.filter(
+            (pl.col("old_species") == "EMPTY") & 
+            (pl.col("new_species") != "EMPTY") & 
+            (pl.col("paired_site") == -1)
+        )
         
+        # Count total bindings per site
+        counts = bindings.group_by("dwell_site").agg(pl.count().alias("total_binding_events"))
+        
+        # Divide by total runs
+        freqs = counts.with_columns((pl.col("total_binding_events") / total_runs).alias("mean_binding_events_per_run"))
+        
+        # Ensure all sites [0, total_binding_sites - 1] are present even if they had 0 bindings
+        sites_df = pl.DataFrame({"dwell_site": np.arange(self.total_binding_sites, dtype=np.int32)})
+        freqs_complete = sites_df.join(freqs.collect(), on="dwell_site", how="left").fill_null(0.0)
+        return freqs_complete.lazy()
+        
+    def extract_mrna_timeseries(self, run_id_target: int = 0):
+        """Extracts mRNA counts over time for a specific run."""
+        df = self.df_states_log.filter(
+            pl.col("run_id") == run_id_target
+        ).select(["time", "mRNA"]).collect().to_pandas()
+        return df
+
+    def _calc_occupancy_fractions(self):
+        """Calculates the fraction of total simulation time each site spends occupied by each species."""
+        total_runs_df = self.df_states_log.select("run_id").unique().collect()
+        total_runs = total_runs_df.shape[0]
+        if total_runs == 0:
+            return pl.LazyFrame(schema={"dwell_site": pl.Int32, "old_species": pl.Utf8, "occupancy_fraction": pl.Float64})
+            
+        total_time_all_runs = self.total_sim_time * total_runs
+        
+        df = self.dwell_times_log.filter(
+            pl.col("old_species") != "EMPTY"
+        ).group_by(["dwell_site", "old_species"]).agg(
+            pl.sum("event_duration").alias("total_time")
+        ).collect().to_pandas()
+        
+        df["occupancy_fraction"] = df["total_time"] / total_time_all_runs
+        return pl.DataFrame(df).lazy()
+
+    def extract_occupancy_timeline(self, run_id_target: int = 0):
+        """Extracts a chronological timeline of occupancy events for a specific run."""
+        df = self.dwell_times_log.filter(
+            (pl.col("run_id") == run_id_target) &
+            (pl.col("old_species") != "EMPTY")
+        ).collect().to_pandas()
+        
+        if df.empty:
+            return pd.DataFrame(columns=["site", "species", "start_time", "end_time"])
+            
+        # The transition out of a state encodes its duration perfectly
+        df["end_time"] = df["current_sim_time"]
+        df["start_time"] = df["current_sim_time"] - df["event_duration"]
+        df["site"] = df["dwell_site"]
+        df["species"] = df["old_species"]
+        
+        return df[["site", "species", "start_time", "end_time"]]
+
+    def extract_trajectories(self):
+        """Returns a dataframe of all individual molecule trajectories (lifespan, sliding distance, etc)."""
+        df = self.dwell_times_log.collect().to_pandas()
         df = df.sort_values(by=["run_id", "current_sim_time"])
         
         all_completed_trajectories = []
@@ -108,9 +177,18 @@ class Statistics():
             all_completed_trajectories.extend(run_trajectories)
             
         if not all_completed_trajectories:
+            return pd.DataFrame()
+            
+        return pd.DataFrame(all_completed_trajectories)
+
+    def _return_mean_trajectories(self):
+        """Converts the dwell log to pandas to chronologically track sliding molecules."""
+        df_traj_pandas = self.extract_trajectories()
+        
+        if df_traj_pandas.empty:
             return pl.LazyFrame(schema={"run_id": pl.Int32})
 
-        df_traj = pl.DataFrame(all_completed_trajectories)
+        df_traj = pl.DataFrame(df_traj_pandas)
         hetero_rows = df_traj.filter(pl.col("starting_species").is_in(["NANOGb:SOX2f", "SOX2b:NANOGf"]))
         hetero_rows = hetero_rows.with_columns(pl.lit("Heterodimer").alias("starting_species"))
         df_traj_combined = pl.concat([df_traj, hetero_rows])
@@ -150,7 +228,8 @@ class Statistics():
                     "molecule_id": molecule_counter,
                     "starting_species": new_sp,
                     "start_time": current_t ,
-                    "multistep": False
+                    "multistep": False,
+                    "birth_site": site
                 }
             
             # obtain rows where sliding occurs             
@@ -165,13 +244,15 @@ class Statistics():
                     dying_molecule = active_lattice.pop(site)
                     total_lifespan = current_t - dying_molecule["start_time"]            
                     species_label = dying_molecule["starting_species"]
+                    sliding_dist = abs(site - dying_molecule.get("birth_site", site))
                                             
                     completed.append({
                         "run_id": run_id,
                         "molecule_id": dying_molecule["molecule_id"],
                         "starting_species": species_label,
                         "bound_lifespan_s": total_lifespan,
-                        "multistep": dying_molecule["multistep"] 
+                        "multistep": dying_molecule["multistep"],
+                        "sliding_distance": sliding_dist
                     })
             # rows where one foot exits
             elif old_sp != "EMPTY" and new_sp == "EMPTY" and paired != -1:

@@ -9,7 +9,7 @@ import yaml
 from pathlib import Path
 from typing import Dict, Tuple, Optional
 
-import constants
+from . import constants
 
 def load_yaml_config(config_path: str) -> Dict[str, any]:
     """

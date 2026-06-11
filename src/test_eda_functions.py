@@ -80,7 +80,7 @@ def test_case_a_and_c_simple_monomer(tracker):
     
     assert len(results) == 1
     assert results[0]["molecule_id"] == 1
-    assert results[0]["starting_species"] == "SOX2"
+    assert results[0]["starting_species"] == "SOX2b"
     assert results[0]["bound_lifespan_s"] == 10.5
     assert results[0]["run_id"] == "run_1"
     

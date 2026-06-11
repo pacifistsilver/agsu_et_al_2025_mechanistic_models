@@ -31,8 +31,8 @@ class ModelLogger:
     def record_snapshot(self, current_t):
         self.times.append(current_t)
         self.bulk_states.append(self.state.species_counts.copy())
-        self.spatial_states.append(self.state.chromatin_lattice.copy())
-        self.partner_states.append(self.state.chromatin_partner_state.copy())
+        self.spatial_states.append(self.state.chromatin_state.copy())
+        self.partner_states.append(self.state.chromatin_partner_site.copy())
 
     def generate_dataframes(self, final_t):
         """Outputs three dataframes containing simulation data.
@@ -40,17 +40,18 @@ class ModelLogger:
         Return:
             polars dataframes df_states, df_dwell df_rxns.
         """
+        from . import constants
         for i in range(self.state.total_sites):
             if (
-                not self.state.chromatin_site_is_vacant[i]
+                self.state.chromatin_state[i] != constants.SiteState.EMPTY
                 and self.state.chromatin_site_bind_times[i] != -1.0
             ):
 
-                partner_state = self.state.chromatin_partner_state[i]
-                if partner_state >= 0:
-                    if i > partner_state:
+                partner_site = self.state.chromatin_partner_site[i]
+                if partner_site >= 0:
+                    if i > partner_site:
                         continue  # Skip duplicates for bivalent dimers
-                    paired_site = partner_state
+                    paired_site = partner_site
                 else:
                     paired_site = -1
 
@@ -68,15 +69,20 @@ class ModelLogger:
                         True,
                     ]
                 )
-        df_states = pl.DataFrame(
-            {
-                "time": self.times,
-                **{
-                    name: [s[idx] for s in self.bulk_states]
-                    for name, idx in SPECIES_MAP.items()
-                },
-            }
-        )
+        if self.bulk_states:
+            import numpy as np
+            bulk_matrix = np.stack(self.bulk_states)
+            df_states = pl.DataFrame(
+                {
+                    "time": self.times,
+                    **{
+                        name: bulk_matrix[:, idx]
+                        for name, idx in SPECIES_MAP.items()
+                    },
+                }
+            )
+        else:
+            df_states = pl.DataFrame({"time": []})
 
         df_dwell = pl.DataFrame(
             self.residence_time_states,

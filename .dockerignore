@@ -2,3 +2,9 @@
 __pycache__/
 output/
 .snakemake/
+.git/
+tests/
+.pytest_cache/
+scratch/
+notebooks/
+hetmer_excl/

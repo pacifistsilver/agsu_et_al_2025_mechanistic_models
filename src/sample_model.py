@@ -14,7 +14,7 @@ import json
 import polars as pl
 import concurrent.futures
 import numpy as np
-import config_default as config
+from . import config_default as config
 from scipy.stats import qmc
 from .model_call import ModelCall
 from .model_utils import TranscriptionFactor
@@ -31,11 +31,15 @@ def run_and_save_trajectory(
     param_set_dir: str,
     sim_max_time: int,
     model_binding_sites: int,
+    activator_tf: str = "sox2",
 ):
     """Wrapper to run the model, tag the data, and save to Parquet."""
+    
+    is_sox2_activator = activator_tf.lower() in ["sox2", "both"]
+    is_nanog_activator = activator_tf.lower() in ["nanog", "both"]
 
-    SOX2 = TranscriptionFactor(id=1, name="SOX2", valency=2, is_activator=True)
-    NANOG = TranscriptionFactor(id=2, name="NANOG", valency=2, is_activator=False)
+    SOX2 = TranscriptionFactor(id=1, name="SOX2", valency=2, is_activator=is_sox2_activator)
+    NANOG = TranscriptionFactor(id=2, name="NANOG", valency=2, is_activator=is_nanog_activator)
     
     model = ModelCall(
         tfs=[SOX2, NANOG],
@@ -171,7 +175,9 @@ def run_single_parameter_set(
     param_set_id: str = "",
     custom_rates: dict = None,
     custom_initial_state: dict = None,
-    output_dir: str = "output"  
+    output_dir: str = config.out_dir,
+    max_workers: int = 8,
+    activator_tf: str = "sox2",
 ):
     """
     Runs multiple stochastic trajectories for a given parameter/variable set.
@@ -210,7 +216,7 @@ def run_single_parameter_set(
 
     print(f"Submitting {runs} baseline simulations for parameter set {param_set_id}...")
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=8) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         for run_id in range(runs):
             futures.append(
@@ -222,6 +228,7 @@ def run_single_parameter_set(
                     param_set_dir,
                     sim_max_time,
                     model_binding_sites,
+                    activator_tf,
                 )
             )
 
@@ -250,12 +257,15 @@ def run_single_parameter_set(
         df_final.write_parquet(save_path)
         print(f"Successfully saved aggregated data to {save_path}")      
 
-def execute_simulation(run_id: int, param_set: dict) -> dict:
+def execute_simulation(run_id: int, param_set: dict, activator_tf: str = "sox2") -> dict:
     """Purely runs the math and returns raw data in memory."""
     
+    is_sox2_activator = activator_tf.lower() in ["sox2", "both"]
+    is_nanog_activator = activator_tf.lower() in ["nanog", "both"]
+    
     # Define biology
-    SOX2 = TranscriptionFactor(id=1, name="SOX2", valency=2, is_activator=True)
-    NANOG = TranscriptionFactor(id=2, name="NANOG", valency=2, is_activator=False)
+    SOX2 = TranscriptionFactor(id=1, name="SOX2", valency=2, is_activator=is_sox2_activator)
+    NANOG = TranscriptionFactor(id=2, name="NANOG", valency=2, is_activator=is_nanog_activator)
     
     model = ModelCall(
         tfs=[SOX2, NANOG], # Add biology

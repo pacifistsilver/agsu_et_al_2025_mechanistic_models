@@ -55,15 +55,38 @@ REACTION_NAMES = {
 ### Data Visualisation
 
 SPECIES_PALETTE = {
-    "SOX2b": "#1f77b4",
-    "NANOGb": "#ff7f0e",
-    "NANOGb:SOX2f": "#8CC0EB",
-    "SOX2b:NANOGb": "#d62728",
-    "NANOGb:NANOGf": "#9467bd",
-    "SOX2b:NANOGf": "#3A5B7C",
-    "NANOGb:NANOGb": "#e377c2",
-    "Heterodimer": "#DAA464",
+    "SOX2b": "#0072B2",          # Blue
+    "NANOGb": "#D55E00",         # Vermilion
+    "NANOGb:SOX2f": "#56B4E9",   # Sky Blue
+    "SOX2b:NANOGb": "#009E73",   # Bluish Green
+    "NANOGb:NANOGf": "#CC79A7",  # Reddish Purple
+    "SOX2b:NANOGf": "#E69F00",   # Orange
+    "NANOGb:NANOGb": "#F0E442",  # Yellow
+    "Heterodimer": "#000000",    # Black
 }
+
+class SiteState:
+    EMPTY = 0
+    SOX2b = 1
+    NANOGb = 2
+    NANOGb_SOX2f = 3
+    NANOGb_NANOGf = 4
+    SOX2b_NANOGf = 5
+    SOX2b_NANOGb = 6
+    NANOGb_NANOGb = 7
+    NANOGb_SOX2b = 8
+
+STATE_STRINGS = (
+    "EMPTY",
+    "SOX2b",
+    "NANOGb",
+    "NANOGb:SOX2f",
+    "NANOGb:NANOGf",
+    "SOX2b:NANOGf",
+    "SOX2b:NANOGb",
+    "NANOGb:NANOGb",
+    "NANOGb:SOX2b"
+)
 
 ### Data Processing
 COLUMN_PREFIXES = {

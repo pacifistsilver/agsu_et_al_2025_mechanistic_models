@@ -2,8 +2,8 @@ import os
 import glob
 import json
 import polars as pl
-import config_default as config
-from eda_functions import Statistics
+from . import config_default as config
+from .eda_functions import Statistics
 
 
 
@@ -31,18 +31,15 @@ def compile_all_runs(param_id: str):
             # Extract ID from folder name (e.g., param_set_12 -> 12)
             param_set_id = os.path.basename(folder).replace("param_set_", "")
             
-            # Read specific parameters for this LHS sample
             params_path = os.path.join(folder, "model_parameters.txt")
             rates, initial_state = parse_parameters_txt(params_path)
             
-            # Load the ensemble lazily
             stats = Statistics.from_parquet_dir(
                 param_set_dir=folder, 
-                total_sim_time=1000, # Make sure this matches max_time in your LHS script!
+                total_sim_time=1000,
                 total_binding_sites=10
             )
             
-            # Extract features grouped by run_id
             df_features = stats.extract_per_run_features(param_set_id, rates, initial_state)
             all_run_features.append(df_features)
             
@@ -57,10 +54,8 @@ def compile_all_runs(param_id: str):
         
     print("\nConcatenating master dataset...")
     
-    # Use diagonal concatenation in case some parameter sets generated dimer types that others didn't
     master_df = pl.concat(all_run_features, how="diagonal").fill_null(0.0)
     
-    # Save to disk
     csv_out = os.path.join(base_dir, f"{param_id}_stats.csv")
     parquet_out = os.path.join(base_dir, f"{param_id}_stats.parquet")
     
@@ -82,28 +77,24 @@ def _return_all_mfpt_trajectories(
     """Compiles MFPT data from a specific parameter set directory into a single dataframe."""
     print(f"Extracting all MFPT trajectories for {param_id}...")
     
-    # 1. Resolve the exact directory directly (No glob.glob needed)
     param_dir = os.path.join(output_dir, str(param_id))
     
     if not os.path.exists(param_dir):
         raise FileNotFoundError(f"Parameter directory does not exist: {param_dir}")
 
     try:
-        # 2. Load the statistics for this specific folder
         stats = Statistics.from_parquet_dir(
             param_set_dir=param_dir, 
             total_sim_time=sim_time, 
             total_binding_sites=n_sites
         )
         
-        # 3. Extract the trajectory features
         df_features = stats._return_all_trajectories()
         
         if isinstance(df_features, pl.LazyFrame):
             df_features = df_features.collect()
             
     except Exception as e:
-        # Safe error logging that doesn't rely on undefined variables
         print(f"Error extracting trajectories from {param_dir}: {e}")
         raise e
         
@@ -111,12 +102,48 @@ def _return_all_mfpt_trajectories(
         print(f"No trajectory data found for {param_id}.")
         return df_features
         
-    # 4. Save the compiled data back into that specific parameter's folder
     param_basename = os.path.basename(param_dir)
     parquet_out = os.path.join(param_dir, f"{param_basename}_all_mfpt_histogram_data.parquet")
     
     df_features.write_parquet(parquet_out)
     print(f"SUCCESS! Trajectories saved to: {parquet_out}")
     
-    # 5. CRITICAL: Return the DataFrame so Seaborn in plot_data.py can actually plot it!
     return df_features
+
+def _return_binding_frequencies(
+    param_id: str, 
+    sim_time: int, 
+    n_sites: int = 10,
+    output_dir: str = "output"   
+):
+    """Compiles binding frequency data per site from a specific parameter set directory."""
+    print(f"Extracting binding frequencies for {param_id}...")
+    
+    param_dir = os.path.join(output_dir, str(param_id))
+    
+    if not os.path.exists(param_dir):
+        raise FileNotFoundError(f"Parameter directory does not exist: {param_dir}")
+
+    try:
+        stats = Statistics.from_parquet_dir(
+            param_set_dir=param_dir, 
+            total_sim_time=sim_time, 
+            total_binding_sites=n_sites
+        )
+        
+        df_freq = stats._calc_binding_frequencies_per_site()
+        
+        if isinstance(df_freq, pl.LazyFrame):
+            df_freq = df_freq.collect()
+            
+    except Exception as e:
+        print(f"Error extracting binding frequencies from {param_dir}: {e}")
+        raise e
+        
+    param_basename = os.path.basename(param_dir)
+    parquet_out = os.path.join(param_dir, f"{param_basename}_binding_frequencies.parquet")
+    
+    df_freq.write_parquet(parquet_out)
+    print(f"SUCCESS! Binding frequencies saved to: {parquet_out}")
+    
+    return df_freq.to_pandas()

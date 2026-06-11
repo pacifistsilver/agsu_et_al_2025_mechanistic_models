@@ -66,6 +66,8 @@ class ModelCall:
         self.stoichiometry_matrix[self.state.species_map["mRNA"], 8] = 1
         self.stoichiometry_matrix[self.state.species_map["mRNA"], 9] = -1
 
+        self._propensities = np.zeros(16, dtype=np.float64)
+
     def _calculate_propensities(self):
         """Calculates current reaction propensities based on the system state."""
         c = self.state.species_counts
@@ -78,8 +80,8 @@ class ModelCall:
         bulk_nn = n_free * (n_free - 1) / 2.0
         bulk_sn = s_free * n_free
 
-        len_undimered_s = len(self.state.undimered_sites.get(1, set()))
-        len_undimered_n = len(self.state.undimered_sites.get(2, set()))
+        len_undimered_s = self.state.undimered_count[1]
+        len_undimered_n = self.state.undimered_count[2]
 
         site_bulk = (
             (len_undimered_s * n_free)
@@ -89,68 +91,78 @@ class ModelCall:
 
         promoter_on = self.state.is_promoter_active()
 
-        propensities = np.array(
-            [
-                self.rates.get("k_s_in", 0.0),
-                self.rates.get("k_n_in", 0.0),
-                self.rates.get("k_bind_s", 0.0)
-                * (
-                    ((s_free + ns_free) * len(self.state.vacant_chromatin_sites))
-                    + self.state.total_tether_weight_s
-                ),
-                self.rates.get("k_bind_n", 0.0)
-                * (
-                    (
-                        (n_free + (nn_free * 2) + ns_free)
-                        * len(self.state.vacant_chromatin_sites)
-                    )
-                    + self.state.total_tether_weight_n
-                ),
-                self.rates.get("k_s_out", 0.0) * s_free,
-                self.rates.get("k_n_out", 0.0) * n_free,
-                self.rates.get("k_unbind_s", 0.0) * len(self.state.bound_sites.get(1, set())),
-                self.rates.get("k_unbind_n", 0.0) * len(self.state.bound_sites.get(2, set())),
-                self.rates.get("k_prod_m", 0.0) if promoter_on else 0.0,
-                self.rates.get("k_deg_m", 0.0) * c[self.state.species_map.get("mRNA", 10)],
-                self.rates.get("k_dimerise", 0.0) * (self.state.total_dimer_weight_symmetric / 2.0),
-                self.rates.get("k_dimerise", 0.0) * (bulk_nn + bulk_sn),
-                self.rates.get("k_dissociate", 0.0) * (len(self.state.dimered_dimer_sites) / 2.0),
-                self.rates.get("k_dissociate", 0.0) * (ns_free + nn_free),
-                self.rates.get("k_dimerise", 0.0) * site_bulk,
-                self.rates.get("k_dissociate", 0.0) * (sum(self.state.dangling_counts.values())),
-            ]
-        )
+        total_dangling = self.state.dangling_counts[1] + self.state.dangling_counts[2]
 
-        propensities[propensities < 0] = 0.0
+        self._propensities[0] = self.rates.get("k_s_in", 0.0)
+        self._propensities[1] = self.rates.get("k_n_in", 0.0)
+        self._propensities[2] = self.rates.get("k_bind_s", 0.0) * (((s_free + ns_free) * self.state.vacant_count) + self.state.total_tether_weight_s)
+        self._propensities[3] = self.rates.get("k_bind_n", 0.0) * (((n_free + (nn_free * 2) + ns_free) * self.state.vacant_count) + self.state.total_tether_weight_n)
+        self._propensities[4] = self.rates.get("k_s_out", 0.0) * s_free
+        self._propensities[5] = self.rates.get("k_n_out", 0.0) * n_free
+        self._propensities[6] = self.rates.get("k_unbind_s", 0.0) * self.state.bound_count[1]
+        self._propensities[7] = self.rates.get("k_unbind_n", 0.0) * self.state.bound_count[2]
+        self._propensities[8] = self.rates.get("k_prod_m", 0.0) if promoter_on else 0.0
+        self._propensities[9] = self.rates.get("k_deg_m", 0.0) * c[self.state.species_map.get("mRNA", 10)]
+        self._propensities[10] = self.rates.get("k_dimerise", 0.0) * (self.state.total_dimer_weight_symmetric / 2.0)
+        self._propensities[11] = self.rates.get("k_dimerise", 0.0) * (bulk_nn + bulk_sn)
+        self._propensities[12] = self.rates.get("k_dissociate", 0.0) * (self.state.dimered_count / 2.0)
+        self._propensities[13] = self.rates.get("k_dissociate", 0.0) * (ns_free + nn_free)
+        self._propensities[14] = self.rates.get("k_dimerise", 0.0) * site_bulk
+        self._propensities[15] = self.rates.get("k_dissociate", 0.0) * total_dangling
 
-        return propensities, np.sum(propensities)
+        self._propensities[self._propensities < 0] = 0.0
+
+        return self._propensities.copy(), np.sum(self._propensities)
 
     def run_trajectory(self):
-        """Run the Gillespie simulation.
+        """Run the Gillespie simulation using the Next Reaction Method (NRM).
 
-        1. Initialise the system.
-        2. Monte Carlo -> randomly simulate time to next event given an event has occurred randomly select which event has occured.
-        3. Update - based on step 2, move model time forward to the event time and update state of the system.
-        4. Repeat steps 2 to 3 till some stopping criteria is achieved.
+        1. Initialise the system and calculate all initial propensities.
+        2. Generate putative reaction times (tau) for all reactions.
+        3. Extract the minimum tau (mu), advance time to tau_mu, and execute reaction mu.
+        4. Recalculate propensities and update tau values based on NRM rules.
+        5. Repeat till max_time is reached.
 
         Returns:
             tuple: the generated dataframes with simulation data: self.sim_variable_states_df, self.sim_site_dwell_times_df, self.sim_reaction_history_df
         """
         current_t = 0.0
 
+        propensities, total_prop = self._calculate_propensities()
+        num_rxns = len(propensities)
+        
+        tau = np.full(num_rxns, np.inf)
+        for i in range(num_rxns):
+            if propensities[i] > 0:
+                tau[i] = (1.0 / propensities[i]) * np.log(1.0 / np.random.rand())
+
         while current_t < self.max_time:
-            propensities, total_prop = self._calculate_propensities()
-            if total_prop == 0:
+            reaction_index = np.argmin(tau)
+            min_tau = tau[reaction_index]
+
+            if min_tau == np.inf:
                 break
 
-            r1, r2 = np.random.random(2)
-            current_t += (1.0 / total_prop) * np.log(1.0 / r1)
+            current_t = min_tau
 
             self.logger.record_snapshot(current_t)
-            cumulative_props = np.cumsum(propensities)
-            reaction_index = np.searchsorted(cumulative_props, r2 * total_prop)
-
+            
             self.state.species_counts += self.stoichiometry_matrix[:, reaction_index]
             self.reactions.execute(current_t, reaction_index)
+
+            new_propensities, _ = self._calculate_propensities()
+
+            for i in range(num_rxns):
+                a_old = propensities[i]
+                a_new = new_propensities[i]
+                
+                if a_new == 0.0:
+                    tau[i] = np.inf
+                elif i == reaction_index or a_old == 0.0:
+                    tau[i] = current_t + (1.0 / a_new) * np.log(1.0 / np.random.rand())
+                elif a_new != a_old:
+                    tau[i] = current_t + (a_old / a_new) * (tau[i] - current_t)
+                    
+            propensities = new_propensities
 
         return self.logger.generate_dataframes(current_t)

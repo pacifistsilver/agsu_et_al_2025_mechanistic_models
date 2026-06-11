@@ -6,25 +6,52 @@ import os
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-import constants
+from . import constants
 from typing import Optional
 from src.logger import setup_logger
 
 logger = setup_logger(__name__)
 
 
-def setup_plot(figsize: tuple = (8, 6), style: str = "whitegrid") -> tuple:
+def set_nature_style():
+    """Applies Nature publication formatting guidelines to matplotlib."""
+    sns.set_theme(style="ticks")
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
+        "font.size": 7,
+        "axes.titlesize": 8,
+        "axes.labelsize": 7,
+        "xtick.labelsize": 6,
+        "ytick.labelsize": 6,
+        "legend.fontsize": 6,
+        "legend.title_fontsize": 7,
+        "axes.linewidth": 0.5,
+        "grid.linewidth": 0.5,
+        "lines.linewidth": 1.0,
+        "lines.markersize": 3,
+        "xtick.major.width": 0.5,
+        "ytick.major.width": 0.5,
+        "xtick.major.size": 3,
+        "ytick.major.size": 3,
+        "xtick.direction": "out",
+        "ytick.direction": "out",
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
+
+def setup_plot(figsize: tuple = (3.5, 3), style: str = "ticks") -> tuple:
     """
-    Initialise plot with standard theme and figure size.
+    Initialise plot with Nature theme and figure size.
 
     Args:
-        figsize: (width, height) in inches
+        figsize: (width, height) in inches (Nature single col: 3.5, double: 7.2)
         style: Seaborn style theme
 
     Returns:
         Tuple of (fig, ax)
     """
-    sns.set_theme(style=style)
+    set_nature_style()
     fig, ax = plt.subplots(figsize=figsize)
     return fig, ax
 
@@ -72,7 +99,7 @@ def plot_mfpt_scatter(
     hue_col: Optional[str] = None,
     output_path: Optional[str] = None,
     title: str = "MFPT Landscape",
-    figsize: tuple = (8, 6),
+    figsize: tuple = (3.5, 3),
 ) -> tuple:
     """
     Create scatter plot of parameters with MFPT as hue.
@@ -153,26 +180,41 @@ def plot_fano_histogram(
         logger.warning(f"Skipping Fano plot for kbn={kbn}, kbs={kbs}: No data.")
         return
 
-    fig, ax = setup_plot(figsize=figsize)
+    set_nature_style()
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.2, 3))
 
+    # Histogram
     sns.histplot(
         data=subset_df,
         x="mrna_fano",
         bins=20,
         kde=True,
         color="purple",
-        ax=ax,
+        ax=ax1,
     )
-    ax.set_title(f"mRNA Fano Factor Histogram (k_bind_n={kbn}, k_bind_s={kbs})")
-    ax.set_xlabel("Fano Factor (Variance / Mean)")
-    ax.set_ylabel("Frequency (Runs)")
-    ax.grid(axis="y", alpha=0.3)
+    ax1.set_title(f"mRNA Fano Factor Histogram")
+    ax1.set_xlabel("Fano Factor (Variance / Mean)")
+    ax1.set_ylabel("Frequency (Runs)")
+    ax1.grid(axis="y", alpha=0.3)
+    
+    # Violin
+    sns.violinplot(
+        data=subset_df,
+        y="mrna_fano",
+        color="purple",
+        ax=ax2,
+        inner="quartile"
+    )
+    ax2.set_title(f"mRNA Fano Factor Violin")
+    ax2.set_ylabel("Fano Factor")
+
+    plt.suptitle(f"Fano Factor Distribution (k_bind_n={kbn}, k_bind_s={kbs})")
     plt.tight_layout()
 
     os.makedirs(output_dir, exist_ok=True)
     output_file = f"{output_dir}/fano_hist_kbn_{kbn}_kbs_{kbs}.png"
     plt.savefig(output_file, dpi=200)
-    logger.info(f"Saved Fano histogram to {output_file}")
+    logger.info(f"Saved Fano histogram/violin to {output_file}")
     plt.close()
 
 
@@ -181,8 +223,8 @@ def plot_mfpt_histogram(
     species_column: str = "starting_species",
     lifespan_column: str = "mature_lifespan_s",
     output_path: Optional[str] = None,
-    title: str = "MFPT Histogram",
-    figsize: tuple = (10, 6),
+    title: str = "MFPT Contour",
+    figsize: tuple = (3.5, 3),
 ) -> tuple:
     """
     Plot MFPT distribution histogram with species as hue.
@@ -204,8 +246,10 @@ def plot_mfpt_histogram(
     present_species = df[species_column].unique()
     valid_hue_order = [s for s in palette.keys() if s in present_species]
 
-    fig, ax = setup_plot(figsize=figsize)
+    set_nature_style()
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.2, 3))
 
+    # Histogram
     sns.histplot(
         data=df,
         x=lifespan_column,
@@ -217,11 +261,27 @@ def plot_mfpt_histogram(
         common_norm=False,
         alpha=0.3,
         linewidth=2,
-        ax=ax,
+        ax=ax1,
     )
-    ax.set_title(title)
-    ax.set_xlabel("MFPT (s)")
-    ax.set_ylabel("Density")
+    ax1.set_title("Histogram")
+    ax1.set_xlabel("MFPT (s)")
+    ax1.set_ylabel("Density")
+    
+    # Violin
+    sns.violinplot(
+        data=df,
+        x=species_column,
+        y=lifespan_column,
+        palette=palette,
+        order=valid_hue_order,
+        ax=ax2,
+        inner="quartile"
+    )
+    ax2.set_title("Violin Plot")
+    ax2.set_xlabel("Species")
+    ax2.set_ylabel("MFPT (s)")
+
+    plt.suptitle(title)
     plt.tight_layout()
 
     if output_path:
@@ -230,7 +290,7 @@ def plot_mfpt_histogram(
         plt.close()
         return None, None
 
-    return fig, ax
+    return fig, (ax1, ax2)
 
 
 def plot_mfpt_contour(
@@ -502,7 +562,307 @@ def plot_mfpt_comparison(
     plt.close()
 
 
+def plot_binding_frequencies(
+    df: pd.DataFrame,
+    output_path: str = None,
+    title: str = "Mean Binding Events per Site",
+    figsize: tuple = (3.5, 3)
+) -> None:
+    """
+    Plot bar chart of mean binding events per site.
+    
+    Args:
+        df: DataFrame containing dwell_site and mean_binding_events_per_run.
+        output_path: Path to save the figure.
+        title: Title of the plot.
+        figsize: Figure size.
+    """
+    set_nature_style()
+    fig, ax = plt.subplots(figsize=figsize)
+    sns.barplot(
+        data=df,
+        x="dwell_site",
+        y="mean_binding_events_per_run",
+        color="steelblue",
+        ax=ax
+    )
+    
+    ax.set_title(title)
+    ax.set_xlabel("Site Index")
+    ax.set_ylabel("Mean Binding Events (per run)")
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    
+    if output_path:
+        ensure_output_dir(output_path)
+        plt.savefig(output_path, dpi=200)
+        logger.info(f"Saved binding frequencies plot to {output_path}")
+        plt.close()
 
 
+def plot_occupancy_timeline(
+    df: pd.DataFrame,
+    output_path: str = None,
+    title: str = "Binding Events Timeline",
+    figsize: tuple = (7.2, 3)
+) -> None:
+    """
+    Plot timeline (raster plot) of occupancy events over time.
+    
+    Args:
+        df: DataFrame containing site, species, start_time, end_time.
+        output_path: Path to save the figure.
+        title: Title of the plot.
+        figsize: Figure size.
+    """
+    set_nature_style()
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    palette = get_species_palette()
+    
+    for species, group in df.groupby("species"):
+        color = palette.get(species, "black")
+        ax.hlines(
+            y=group["site"],
+            xmin=group["start_time"],
+            xmax=group["end_time"],
+            color=color,
+            linewidth=6,
+            label=species
+        )
+        
+    ax.set_title(title)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Binding Site")
+    
+    # Remove duplicate labels in legend
+    handles, labels = ax.get_legend_handles_labels()
+    if labels:
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys(), bbox_to_anchor=(1.05, 1), loc="upper left")
+    
+    # Ensure y-axis shows discrete sites cleanly
+    if not df.empty:
+        max_site = int(df["site"].max())
+        ax.set_yticks(range(max_site + 1))
+        
+    plt.tight_layout()
+    
+    if output_path:
+        ensure_output_dir(output_path)
+        plt.savefig(output_path, dpi=200, bbox_inches="tight")
+        logger.info(f"Saved occupancy timeline plot to {output_path}")
+        plt.close()
 
+def plot_occupancy_profile(df: pd.DataFrame, output_path: str = None, title: str = "Time-Fraction Occupancy per Site", figsize: tuple = (3.5, 3)) -> None:
+    """
+    Plot stacked bar chart of fraction of total simulation time each site is occupied.
+    
+    Args:
+        df: DataFrame containing dwell_site, old_species, occupancy_fraction.
+        output_path: Path to save the figure.
+        title: Title of the plot.
+        figsize: Figure size.
+    """
+    set_nature_style()
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    if df.empty:
+        ax.set_title(title + " (No Data)")
+    else:
+        pivot_df = df.pivot(index="dwell_site", columns="old_species", values="occupancy_fraction").fillna(0)
+        max_site = int(df["dwell_site"].max())
+        pivot_df = pivot_df.reindex(range(max_site + 1), fill_value=0)
+        
+        palette = get_species_palette()
+        colors = [palette.get(c, "grey") for c in pivot_df.columns]
+        
+        pivot_df.plot(kind="bar", stacked=True, color=colors, ax=ax, width=0.8)
+        
+        ax.set_title(title)
+        ax.set_xlabel("Site Index")
+        ax.set_ylabel("Fraction of Time Occupied")
+        ax.set_ylim(0, 1)
+        
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles, labels, title="Species", bbox_to_anchor=(1.05, 1), loc="upper left")
+        
+    plt.tight_layout()
+    if output_path:
+        ensure_output_dir(output_path)
+        plt.savefig(output_path, dpi=200, bbox_inches="tight")
+        logger.info(f"Saved occupancy profile to {output_path}")
+        plt.close()
+
+def plot_transcriptional_bursting(
+    mrna_df: pd.DataFrame, 
+    occupancy_df: pd.DataFrame, 
+    promoter_site: int, 
+    output_path: str = None, 
+    title: str = "Transcriptional Bursting Timeline",
+    figsize: tuple = (7.2, 2.5)
+) -> None:
+    """
+    Plot step function of mRNA count over time, with shaded background for promoter occupancy.
+    
+    Args:
+        mrna_df: DataFrame with 'time' and 'mRNA' columns.
+        occupancy_df: Timeline DataFrame from extract_occupancy_timeline().
+        promoter_site: The site index of the promoter to highlight.
+        output_path: Path to save the figure.
+        title: Title of the plot.
+        figsize: Figure size.
+    """
+    fig, ax = setup_plot(figsize=figsize)
+    
+    if not mrna_df.empty:
+        ax.step(mrna_df["time"], mrna_df["mRNA"], where="post", color="black", linewidth=2, label="mRNA Count")
+    
+    promoter_occupancy = occupancy_df[occupancy_df["site"] == promoter_site] if not occupancy_df.empty else pd.DataFrame()
+    palette = get_species_palette()
+    
+    for _, row in promoter_occupancy.iterrows():
+        color = palette.get(row["species"], "grey")
+        ax.axvspan(row["start_time"], row["end_time"], color=color, alpha=0.3, lw=0)
+        
+    ax.set_title(f"{title} (Promoter at Site {promoter_site})")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("mRNA Count")
+    
+    import matplotlib.patches as mpatches
+    handles, labels = ax.get_legend_handles_labels()
+    
+    if not promoter_occupancy.empty:
+        unique_species = promoter_occupancy["species"].unique()
+        for sp in unique_species:
+            handles.append(mpatches.Patch(color=palette.get(sp, "grey"), alpha=0.3))
+            labels.append(f"{sp} (Promoter Bound)")
+            
+    if handles:
+        ax.legend(handles, labels, bbox_to_anchor=(1.05, 1), loc="upper left")
+        
+    plt.tight_layout()
+    if output_path:
+        ensure_output_dir(output_path)
+        plt.savefig(output_path, dpi=200, bbox_inches="tight")
+        logger.info(f"Saved transcriptional bursting plot to {output_path}")
+        plt.close()
+
+def plot_sliding_distance_histogram(
+    df: pd.DataFrame, 
+    output_path: str, 
+    species_column: str = "starting_species",
+    distance_column: str = "sliding_distance",
+    title: str = "Sliding Distance (Antenna Effect) Histogram",
+    figsize: tuple = (10, 6)
+) -> None:
+    """
+    Plot histogram of sliding distance distribution.
+    
+    Args:
+        df: DataFrame containing species and sliding distance.
+        output_path: Path to save the figure.
+        species_column: Column name for species.
+        distance_column: Column name for distance.
+        title: Title of the plot.
+        figsize: Figure size.
+    """
+    if df.empty or distance_column not in df.columns:
+        fig, ax = setup_plot(figsize=figsize)
+        ax.set_title(title + " (No Data)")
+    else:
+        set_nature_style()
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.2, 3))
+        
+        palette = get_species_palette()
+        present_species = df[species_column].unique()
+        valid_hue_order = [s for s in palette.keys() if s in present_species]
+        
+        # Histogram
+        sns.histplot(
+            data=df,
+            x=distance_column,
+            hue=species_column,
+            palette=palette,
+            hue_order=valid_hue_order,
+            multiple="dodge",
+            discrete=True,
+            shrink=0.8,
+            ax=ax1
+        )
+        ax1.set_title("Histogram")
+        ax1.set_xlabel("Absolute Sliding Distance (Sites)")
+        ax1.set_ylabel("Count")
+        
+        # Violin
+        sns.violinplot(
+            data=df,
+            x=species_column,
+            y=distance_column,
+            palette=palette,
+            order=valid_hue_order,
+            ax=ax2,
+            inner="quartile"
+        )
+        ax2.set_title("Violin Plot")
+        ax2.set_xlabel("Species")
+        ax2.set_ylabel("Absolute Sliding Distance (Sites)")
+        
+        plt.suptitle(title)
+        
+    plt.tight_layout()
+    if output_path:
+        ensure_output_dir(output_path)
+        plt.savefig(output_path, dpi=200, bbox_inches="tight")
+        logger.info(f"Saved sliding distance histogram/violin to {output_path}")
+        plt.close()
+
+def plot_survival_curve(
+    df: pd.DataFrame, 
+    lifespan_column: str = "mature_lifespan_s", 
+    species_column: str = "starting_species", 
+    output_path: str = None, 
+    title: str = "Residence Time Survival Curve",
+    figsize: tuple = (3.5, 3)
+) -> None:
+    """
+    Plot log-y survival curve for residence times.
+    
+    Args:
+        df: DataFrame containing species and lifespan.
+        lifespan_column: Column name for lifespan.
+        species_column: Column name for species.
+        output_path: Path to save the figure.
+        title: Title of the plot.
+        figsize: Figure size.
+    """
+    import numpy as np
+    fig, ax = setup_plot(figsize=figsize)
+    
+    if df.empty or lifespan_column not in df.columns:
+        ax.set_title(title + " (No Data)")
+    else:
+        palette = get_species_palette()
+        for species, group in df.groupby(species_column):
+            color = palette.get(species, "grey")
+            lifespans = np.sort(group[lifespan_column].dropna())
+            if len(lifespans) == 0: continue
+            
+            survival_prob = 1.0 - np.arange(1, len(lifespans) + 1) / len(lifespans)
+            
+            # Use where="post" to keep step function appearance
+            ax.step(lifespans, survival_prob, where="post", label=species, color=color, linewidth=2)
+            
+        ax.set_yscale("log")
+        ax.set_ylabel("Survival Probability P(T > t)")
+        ax.set_xlabel("Residence Time t (s)")
+        ax.set_title(title)
+        ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
+        
+    plt.tight_layout()
+    if output_path:
+        ensure_output_dir(output_path)
+        plt.savefig(output_path, dpi=200, bbox_inches="tight")
+        logger.info(f"Saved survival curve to {output_path}")
+        plt.close()
 
