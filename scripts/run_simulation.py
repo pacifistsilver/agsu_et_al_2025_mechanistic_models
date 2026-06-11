@@ -16,7 +16,8 @@ if __name__ == "__main__":
         runs=100, 
         custom_initial_state=states,
         custom_rates=rates,
-        param_set_id=experiment_name
+        param_set_id=experiment_name,
+        activator_tf=cfg.get("activator_tf", "sox2")
     )
 
     # Touch the 'done' file so Snakemake knows this rule succeeded
