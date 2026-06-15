@@ -1,8 +1,6 @@
-# Protein-protein interactions drive differences in the spatiotemporal dynamics of transcription factors NANOG and SOX2 in naïve pluripotent cells
+# Stochastic modelling of NANOG/SOX2 dynamics in gene expression noise
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
-![Jupyter](https://img.shields.io/badge/Jupyter-Supported-orange.svg)
-![Snakemake](https://img.shields.io/badge/Snakemake-Enabled-brightgreen.svg)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)
 
 ## repo structure
@@ -46,5 +44,5 @@ docker run -it -v $(pwd):/app pacifistsilver/stochresidence:0.1
 ```
 
 
-
-Developed for LIFE70040 / SB-RPC Joint Lab Project
+## Publication
+G. G. Agsu et al., “Protein-protein interactions drive differences in the spatiotemporal dynamics of transcription factors NANOG and SOX2 in naïve pluripotent cells,” Dec. 2025, doi: https://doi.org/10.64898/2025.12.03.691924.
