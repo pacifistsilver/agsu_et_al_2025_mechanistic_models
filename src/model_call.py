@@ -1,209 +1,238 @@
-"""Gillespie model of gene expression given spatiotemporal dynamics.
-
-This module obtains residence time and mRNA expression from a single realisation of a
-single trajectory of the chemical master equation. 
-
-Typical usage:
-    model_call = ModelCall(
-        rate_constants=MODEL_RATE_CONSTANTS,
-        initial_species_states=INITIAL_MODEL_STATE,
-        total_binding_sites=10,
-        max_sim_time=100
-    )
-    df_states, df_dwell, df_rxns = model_call.run_trajectory()
-
-If you face any issues, email: dwl25@ic.ac.uk or danielluo1143@gmail.com
+"""StochPy-based Gillespie simulation of gene expression given spatiotemporal dynamics.
 """
 import numpy as np
-from .model_utils import TranscriptionFactor
-from .model_state import ModelState
-from .model_logger import ModelLogger
-from .model_reactions import ModelReactions
-from typing import List
+import polars as pl
+import stochpy
+import os
+import sys
 
+from .model_utils import TranscriptionFactor
+from .config_default import SPECIES_NAMES, REACTION_NAMES, SPECIES_MAP
+from .constants import STATE_STRINGS, SiteState
+from .psc_generator import generate_psc
 
 
 class ModelCall:
-    """Class handles building simulation by calling ModelState, Logger, and Reactions. In addition to handling Gillespie algorithm logic and propensity calculations.
-
-    Attributes:
-        model_param (dict): Reaction kinetic parameters (k_prod_s, k_bind_s, etc.).
-        model_var (dict): Initial molecule counts for the simulation.
-        model_binding_sites (int): Total number of binding sites in the chromatin lattice.
-        record_interval (float): Simulation time interval to record reactions.
-        sim_max_time (int): maximum simulation runtime.
-
-    """
-
     def __init__(
         self,
-        tfs: List[TranscriptionFactor],
+        tfs,
         model_param: dict,
         model_var: dict,
         model_binding_sites: int,
         sim_max_time,
         record_interval: float = 1.0,
     ):
-        self.record_interval = record_interval
         self.rates = model_param
         self.max_time = sim_max_time
+        self.num_sites = model_binding_sites
+        self.record_interval = record_interval
+        self.model_var = model_var
 
-        self.state = ModelState(
-            tfs=tfs,
-            total_binding_sites=model_binding_sites,
-            initial_species_states=model_var,
-        )
+        # Ensure the .psc file exists
+        psc_filename = "spatial_chromatin.psc"
+        psc_path = os.path.join(os.getcwd(), psc_filename)
         
-        self.observers = []
-        
-        self.logger = ModelLogger(self.state)
-        self.add_observer(self.logger)
-        
-        self.reactions = ModelReactions(self.state)
+        generate_psc(self.num_sites, filename=psc_path)
 
-        self.stoichiometry_matrix = np.zeros(
-            (len(self.state.species_names), len(self.state.reaction_names)), dtype=np.int32
-        )
-        self.stoichiometry_matrix[self.state.species_map["sox2_monomer_free"], 0] = 1
-        self.stoichiometry_matrix[self.state.species_map["nanog_monomer_free"], 1] = 1
-        self.stoichiometry_matrix[self.state.species_map["sox2_monomer_free"], 4] = -1
-        self.stoichiometry_matrix[self.state.species_map["nanog_monomer_free"], 5] = -1
-        self.stoichiometry_matrix[self.state.species_map["mRNA"], 8] = 1
-        self.stoichiometry_matrix[self.state.species_map["mRNA"], 9] = -1
+        # Initialize StochPy SSA
+        self.smod = stochpy.SSA()
+        # Suppress extensive StochPy output
+        # stochpy.core2.py uses standard print, but stochpy has Quiet()
+        try:
+            stochpy.Quiet()
+        except:
+            pass
 
-        self._propensities = np.zeros(16, dtype=np.float64)
-
-    def add_observer(self, observer):
-        """_summary_ Adds an observer to the simulation's event stream."""
-        self.observers.append(observer)
-
-    def notify_snapshot(self, current_t):
-        """_summary_ Emits a state snapshot event to all observers."""
-        for obs in self.observers:
-            obs.on_snapshot(current_t, self.state)
-
-    def notify_reaction(self, current_t, reaction_index, primary_site=-1, secondary_site=-1):
-        """_summary_ Emits a reaction fired event to all observers."""
-        for obs in self.observers:
-            obs.on_reaction_fired(current_t, reaction_index, primary_site, secondary_site)
-
-    def notify_site_state_changed(self, current_t, site, old_species, new_species, reaction_name, duration, paired_site=-1, is_bound=True):
-        """_summary_ Emits a site state change event for residence time logging."""
-        for obs in self.observers:
-            obs.on_site_state_changed(current_t, site, old_species, new_species, reaction_name, duration, paired_site, is_bound)
-
-    def _calculate_propensities(self):
-        """_summary_ Calculates current reaction propensities based on the system state.
-        
-        Returns:
-            propensities (numpy.ndarray): updated array of reaction propensities.
-            total_propensity (float): sum of all propensities.
-        """
-        c = self.state.species_counts
-
-        s_free = c[self.state.species_map["sox2_monomer_free"]]
-        n_free = c[self.state.species_map["nanog_monomer_free"]]
-        ns_free = c[self.state.species_map["nanog_sox2_dimer_free"]]
-        nn_free = c[self.state.species_map["nanog_nanog_dimer_free"]]
-
-        # calculate bulk dimer counts
-        bulk_nn = n_free * (n_free - 1) / 2.0
-        bulk_sn = s_free * n_free
-
-        len_undimered_s = self.state.undimered_count[1]
-        len_undimered_n = self.state.undimered_count[2]
-
-        # bulk dimerisation with site bound monomers
-        site_bulk = (
-            (len_undimered_s * n_free)
-            + (len_undimered_n * s_free)
-            + (len_undimered_n * n_free)
-        )
-
-        promoter_on = self.state.is_promoter_active()
-
-        # dangling arms for dedimerisation
-        total_dangling = self.state.dangling_counts[1] + self.state.dangling_counts[2]
-
-        # update all reaction propensities
-        self._propensities[0] = self.rates.get("k_s_in", 0.0)
-        self._propensities[1] = self.rates.get("k_n_in", 0.0)
-        self._propensities[2] = self.rates.get("k_bind_s", 0.0) * (((s_free + ns_free) * self.state.vacant_count) + self.state.total_tether_weight_s)
-        self._propensities[3] = self.rates.get("k_bind_n", 0.0) * (((n_free + (nn_free * 2) + ns_free) * self.state.vacant_count) + self.state.total_tether_weight_n)
-        self._propensities[4] = self.rates.get("k_s_out", 0.0) * s_free
-        self._propensities[5] = self.rates.get("k_n_out", 0.0) * n_free
-        self._propensities[6] = self.rates.get("k_unbind_s", 0.0) * self.state.bound_count[1]
-        self._propensities[7] = self.rates.get("k_unbind_n", 0.0) * self.state.bound_count[2]
-        self._propensities[8] = self.rates.get("k_prod_m", 0.0) if promoter_on else 0.0
-        self._propensities[9] = self.rates.get("k_deg_m", 0.0) * c[self.state.species_map.get("mRNA", 10)]
-        self._propensities[10] = self.rates.get("k_dimerise", 0.0) * (self.state.total_dimer_weight_symmetric / 2.0)
-        self._propensities[11] = self.rates.get("k_dimerise", 0.0) * (bulk_nn + bulk_sn)
-        self._propensities[12] = self.rates.get("k_dissociate", 0.0) * (self.state.dimered_count / 2.0)
-        self._propensities[13] = self.rates.get("k_dissociate", 0.0) * (ns_free + nn_free)
-        self._propensities[14] = self.rates.get("k_dimerise", 0.0) * site_bulk
-        self._propensities[15] = self.rates.get("k_dissociate", 0.0) * total_dangling
-
-        self._propensities[self._propensities < 0] = 0.0
-
-        return self._propensities.copy(), np.sum(self._propensities)
+        self.smod.Model(model_file=psc_filename, dir=os.getcwd())
 
     def run_trajectory(self):
-        """Run the Gillespie simulation using the Next Reaction Method (NRM).
+        # 1. Apply rate parameters
+        for param_name, param_val in self.rates.items():
+            self.smod.ChangeParameter(param_name, param_val)
 
-        1. Initialise the system and calculate all initial propensities.
-        2. Generate putative reaction times (tau) for all reactions.
-        3. Extract the minimum tau (mu), advance time to tau_mu, and execute reaction mu.
-        4. Recalculate propensities and update tau values based on NRM rules.
-        5. Repeat till max_time is reached.
+        # 2. Run stochastic simulation
+        # Use Direct method which is robust for many reactions
+        self.smod.DoStochSim(method='Direct', mode='time', end=self.max_time, trajectories=1)
 
-        Returns:
-            tuple: the generated dataframes with simulation data: self.sim_variable_states_df, self.sim_site_dwell_times_df, self.sim_reaction_history_df
-        """
-        current_t = 0.0
-
-        # initial propensities
-        propensities, total_prop = self._calculate_propensities()
-        num_rxns = len(propensities)
+        # 3. Process output data
+        # We don't need GetTrajectoryData(1) as StochPy stores the last run in data_stochsim
+        times = self.smod.data_stochsim.time
+        species_matrix = self.smod.data_stochsim.species
+        labels = self.smod.data_stochsim.species_labels
         
-        # generate initial putative times for all reactions
-        tau = np.full(num_rxns, np.inf)
-        for i in range(num_rxns):
-            if propensities[i] > 0:
-                tau[i] = (1.0 / propensities[i]) * np.log(1.0 / np.random.rand())
+        # Build dictionary for fast column access
+        col_idx = {label: i for i, label in enumerate(labels)}
 
-        # nrm loop
-        while current_t < self.max_time:
-            # find next reaction
-            reaction_index = np.argmin(tau)
-            min_tau = tau[reaction_index]
+        # Helper to safely sum columns
+        def sum_cols(prefix, suffixes, labels_list):
+            total = np.zeros(len(times))
+            for suff in suffixes:
+                name = prefix + suff
+                if name in col_idx:
+                    total += species_matrix[:, col_idx[name]]
+            return total
 
-            if min_tau == np.inf:
-                break
+        # --- Reconstruct df_states ---
+        df_states_dict = {"time": times}
+        
+        S_free = species_matrix[:, col_idx["S_free"]] if "S_free" in col_idx else np.zeros(len(times))
+        N_free = species_matrix[:, col_idx["N_free"]] if "N_free" in col_idx else np.zeros(len(times))
+        SN_free = species_matrix[:, col_idx["SN_free"]] if "SN_free" in col_idx else np.zeros(len(times))
+        NN_free = species_matrix[:, col_idx["NN_free"]] if "NN_free" in col_idx else np.zeros(len(times))
+        mRNA = species_matrix[:, col_idx["mRNA"]] if "mRNA" in col_idx else np.zeros(len(times))
 
-            current_t = min_tau
+        S_bound_total = np.zeros(len(times))
+        N_bound_total = np.zeros(len(times))
+        SN_single_bound_total = np.zeros(len(times))
+        NN_single_bound_total = np.zeros(len(times))
+        
+        for i in range(self.num_sites):
+            if f"S_{i}_S" in col_idx: S_bound_total += species_matrix[:, col_idx[f"S_{i}_S"]]
+            if f"S_{i}_N" in col_idx: N_bound_total += species_matrix[:, col_idx[f"S_{i}_N"]]
+            if f"S_{i}_SNf" in col_idx: SN_single_bound_total += species_matrix[:, col_idx[f"S_{i}_SNf"]]
+            if f"S_{i}_NSf" in col_idx: SN_single_bound_total += species_matrix[:, col_idx[f"S_{i}_NSf"]]
+            if f"S_{i}_NNf" in col_idx: NN_single_bound_total += species_matrix[:, col_idx[f"S_{i}_NNf"]]
 
-            self.notify_snapshot(current_t)
+        SN_dimer_bound = np.zeros(len(times))
+        NN_dimer_bound = np.zeros(len(times))
+        
+        for i in range(self.num_sites):
+            for j in range(i+1, self.num_sites):
+                if f"T_{i}_{j}_SN" in col_idx: SN_dimer_bound += species_matrix[:, col_idx[f"T_{i}_{j}_SN"]]
+                if f"T_{i}_{j}_NS" in col_idx: SN_dimer_bound += species_matrix[:, col_idx[f"T_{i}_{j}_NS"]]
+                if f"T_{i}_{j}_NN" in col_idx: NN_dimer_bound += species_matrix[:, col_idx[f"T_{i}_{j}_NN"]]
+
+        df_states_dict["sox2_monomer_free"] = S_free
+        df_states_dict["nanog_monomer_free"] = N_free
+        df_states_dict["nanog_sox2_dimer_free"] = SN_free
+        df_states_dict["nanog_nanog_dimer_free"] = NN_free
+        df_states_dict["sox2_monomer_bound"] = S_bound_total
+        df_states_dict["nanog_monomer_bound"] = N_bound_total
+        df_states_dict["nanog_sox2_dimer_bound"] = SN_dimer_bound
+        df_states_dict["nanog_nanog_dimer_bound"] = NN_dimer_bound
+        df_states_dict["nanog_sox2_dimer_single_bound"] = SN_single_bound_total
+        df_states_dict["nanog_nanog_dimer_single_bound"] = NN_single_bound_total
+        df_states_dict["mRNA"] = mRNA
+
+        # Ensure correct column order
+        final_state_cols = {"time": times}
+        for name in SPECIES_NAMES:
+            final_state_cols[name] = df_states_dict.get(name, np.zeros(len(times)))
+        df_states = pl.DataFrame(final_state_cols)
+
+        # --- Reconstruct df_dwell ---
+        # State inference
+        site_states = np.full((len(times), self.num_sites), "EMPTY", dtype=object)
+        site_partners = np.full((len(times), self.num_sites), -1, dtype=int)
+
+        # Monomers and dangling
+        for i in range(self.num_sites):
+            idx_s = col_idx.get(f"S_{i}_S", -1)
+            idx_n = col_idx.get(f"S_{i}_N", -1)
+            idx_snf = col_idx.get(f"S_{i}_SNf", -1)
+            idx_nsf = col_idx.get(f"S_{i}_NSf", -1)
+            idx_nnf = col_idx.get(f"S_{i}_NNf", -1)
             
-            # execute reaction and update state
-            self.state.species_counts += self.stoichiometry_matrix[:, reaction_index]
-            p_site, s_site = self.reactions.execute(current_t, reaction_index)
-            self.notify_reaction(current_t, reaction_index, p_site, s_site)
+            if idx_s != -1: site_states[species_matrix[:, idx_s] == 1, i] = "SOX2b"
+            if idx_n != -1: site_states[species_matrix[:, idx_n] == 1, i] = "NANOGb"
+            if idx_snf != -1: site_states[species_matrix[:, idx_snf] == 1, i] = "SOX2b:NANOGf"
+            if idx_nsf != -1: site_states[species_matrix[:, idx_nsf] == 1, i] = "NANOGb:SOX2f"
+            if idx_nnf != -1: site_states[species_matrix[:, idx_nnf] == 1, i] = "NANOGb:NANOGf"
 
-            # recalculate propensities
-            new_propensities, _ = self._calculate_propensities()
-
-            # update tau according to next reaction method (nrm) rules
-            for i in range(num_rxns):
-                a_old = propensities[i]
-                a_new = new_propensities[i]
+        # Tethers
+        for i in range(self.num_sites):
+            for j in range(i+1, self.num_sites):
+                idx_sn = col_idx.get(f"T_{i}_{j}_SN", -1)
+                idx_ns = col_idx.get(f"T_{i}_{j}_NS", -1)
+                idx_nn = col_idx.get(f"T_{i}_{j}_NN", -1)
                 
-                if a_new == 0.0:
-                    tau[i] = np.inf
-                elif i == reaction_index or a_old == 0.0:
-                    tau[i] = current_t + (1.0 / a_new) * np.log(1.0 / np.random.rand())
-                elif a_new != a_old:
-                    tau[i] = current_t + (a_old / a_new) * (tau[i] - current_t)
+                if idx_sn != -1:
+                    mask = species_matrix[:, idx_sn] == 1
+                    site_states[mask, i] = "SOX2b:NANOGb"
+                    site_partners[mask, i] = j
+                    site_states[mask, j] = "NANOGb:SOX2b"
+                    site_partners[mask, j] = i
                     
-            propensities = new_propensities
+                if idx_ns != -1:
+                    mask = species_matrix[:, idx_ns] == 1
+                    site_states[mask, i] = "NANOGb:SOX2b"
+                    site_partners[mask, i] = j
+                    site_states[mask, j] = "SOX2b:NANOGb"
+                    site_partners[mask, j] = i
+                    
+                if idx_nn != -1:
+                    mask = species_matrix[:, idx_nn] == 1
+                    site_states[mask, i] = "NANOGb:NANOGb"
+                    site_partners[mask, i] = j
+                    site_states[mask, j] = "NANOGb:NANOGb"
+                    site_partners[mask, j] = i
 
-        return self.logger.generate_dataframes(current_t)
+        residence_events = []
+        # Calculate dwell events
+        for i in range(self.num_sites):
+            prev_state = site_states[0, i]
+            prev_partner = site_partners[0, i]
+            start_t = times[0]
+            
+            for t_idx in range(1, len(times)):
+                curr_state = site_states[t_idx, i]
+                curr_partner = site_partners[t_idx, i]
+                
+                if curr_state != prev_state or curr_partner != prev_partner:
+                    if prev_state != "EMPTY":
+                        duration = times[t_idx] - start_t
+                        residence_events.append([
+                            duration,
+                            times[t_idx],
+                            i,
+                            prev_partner,
+                            prev_state,
+                            curr_state,
+                            "STOCHPY_RXN",  # Exact rxn name not tracked explicitly
+                            False if curr_state == "EMPTY" else True
+                        ])
+                    start_t = times[t_idx]
+                    prev_state = curr_state
+                    prev_partner = curr_partner
+                    
+            # Handle end of simulation
+            if prev_state != "EMPTY":
+                residence_events.append([
+                    times[-1] - start_t,
+                    times[-1],
+                    i,
+                    prev_partner,
+                    prev_state,
+                    "STILL_BOUND",
+                    "END_OF_SIMULATION",
+                    True
+                ])
+
+        df_dwell = pl.DataFrame(
+            residence_events,
+            schema={
+                "event_duration": pl.Float64,
+                "current_sim_time": pl.Float64,
+                "dwell_site": pl.Int64,
+                "paired_site": pl.Int64,
+                "old_species": pl.String,
+                "new_species": pl.String,
+                "reaction_name": pl.String,
+                "is_bound": pl.Boolean,
+            },
+            orient="row",
+        )
+
+        # Provide a dummy df_rxns since StochPy doesn't trivially export the exact reaction history strings natively
+        df_rxns = pl.DataFrame(
+            [],
+            schema={
+                "time": pl.Float64,
+                "reaction_type": pl.String,
+                "primary_site": pl.Int64,
+                "secondary_site": pl.Int64,
+            },
+            orient="row",
+        )
+
+        return df_states, df_dwell, df_rxns

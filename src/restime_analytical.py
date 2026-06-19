@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from scipy import optimize
 
 beta_s = 0.06
-beta_n = 0.24
+beta_n = 0.04
 
 def P_s1(alpha_s):
     return alpha_s / (alpha_s + beta_s)

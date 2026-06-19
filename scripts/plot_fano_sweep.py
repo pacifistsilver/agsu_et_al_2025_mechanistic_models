@@ -11,13 +11,12 @@ from src.plotting_utils import get_target_column
 from src.restime_analytical import T_bound
 
 def main():
-    parser = argparse.ArgumentParser(description="Replot MFPT landscape in the style of plot_restimes.py")
+    parser = argparse.ArgumentParser(description="noise landscape")
     parser.add_argument("--input", default="output/hetmer_excl/compiled_sweep_stats.parquet", help="Path to input parquet file")
-    parser.add_argument("--output_png", default="mean_residence_time_hue_restimes_style.png", help="Path to output PNG")
-    parser.add_argument("--output_pdf", default="mean_residence_time_hue_restimes_style.pdf", help="Path to output PDF")
+    parser.add_argument("--output_png", default="noise_landscape.png", help="Path to output PNG")
+    parser.add_argument("--output_pdf", default="noise_landscape.pdf", help="Path to output PDF")
     args = parser.parse_args()
 
-    # Set Nature-style plot settings from plot_restimes.py
     plt.rcParams.update({
         'font.size': 12,
         'axes.labelsize': 14,
@@ -37,55 +36,41 @@ def main():
 
     x_col = "param_k_bind_s"
     y_col = "param_k_bind_n"
-    z_col = get_target_column(df, preferred="MFPT_Heterodimer")
-
+    z_col = get_target_column(df, preferred="mrna_fano")
+    
+    
+    
     if z_col is None:
         print("No target column found in data!")
         return
 
-    # Calculate analytical T_bound to get the exact color levels used in plot_restimes.py
-    alphas_s = np.logspace(-2, 0, 100)
-    alphas_n = np.logspace(-2, 0, 100)
-    A_S, A_N = np.meshgrid(alphas_s, alphas_n)
-    TB = np.zeros_like(A_S)
-    for i in range(A_S.shape[0]):
-        for j in range(A_S.shape[1]):
-            TB[i, j] = T_bound(A_S[i, j], A_N[i, j])
-            
-    shared_levels = np.linspace(TB.min(), TB.max(), 50)
-
-    # Create the figure
     fig, ax1 = plt.subplots(figsize=(8, 6))
 
-    # Plot continuous surface via tricontourf
-    # extend='both' ensures values outside the analytical range (e.g., 84s) get colored correctly 
-    # (saturated at the max/min color of the palette) rather than being blank.
     cp1 = ax1.tricontourf(
         df[x_col],
         df[y_col],
         df[z_col],
-        levels=shared_levels,
         cmap='RdBu_r',
-        extend='both',
+        levels=10,
+        extend='both'
     )
 
     ax1.scatter(
         df[x_col],
         df[y_col],
         color="white",
-        edgecolor="black",
         s=15,
+        edgecolor="black",
         alpha=0.1,
         linewidth=0.5,
         zorder=3,
     )
-
-    fig.colorbar(cp1, ax=ax1, label='Mean First Passage Time (s)')
+    fig.colorbar(cp1, ax=ax1, label='mRNA Noise')
     ax1.set_xscale('log')
     ax1.set_yscale('log')
     ax1.set_xlabel(r'$\alpha_S$ (SOX2 Binding Rate, s$^{-1}$)')
     ax1.set_ylabel(r'$\alpha_N$ (NANOG Binding Rate, s$^{-1}$)')
-    ax1.set_title(r'Overall Bound Residence Time (MFPT) $\beta_S$ = 0.06; $\beta_N$ = 0.2')
+    ax1.set_title('mRNA Noise')
 
     plt.tight_layout()
     plt.savefig(args.output_png, dpi=300, bbox_inches='tight')

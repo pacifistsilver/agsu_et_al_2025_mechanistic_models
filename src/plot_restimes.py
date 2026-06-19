@@ -35,15 +35,13 @@ for i in range(A_S.shape[0]):
 fig, ax1 = plt.subplots(figsize=(8, 6))
 
 # Plot T_bound
-cp1 = ax1.contourf(A_S, A_N, TB, levels=50, cmap='viridis')
-fig.colorbar(cp1, ax=ax1, label='Total Effective Residence Time (s)')
+cp1 = ax1.contourf(A_S, A_N, TB, levels=50, cmap='RdBu_r')
+fig.colorbar(cp1, ax=ax1, label='Effective Residence Time (s)')
 ax1.set_xscale('log')
 ax1.set_yscale('log')
 ax1.set_xlabel(r'$\alpha_S$ (SOX2 Binding Rate, s$^{-1}$)')
 ax1.set_ylabel(r'$\alpha_N$ (NANOG Binding Rate, s$^{-1}$)')
-ax1.set_title('Overall Bound Residence Time ($T_{bound}$)')
-
-# (Target parameterisation removed as requested)
+ax1.set_title(r'Overall Bound Residence Time ($T_{bound}$) $\beta_S$ = 0.06; $\beta_N$ = 0.04')
 
 plt.tight_layout()
 plt.savefig('residence_times_landscape.png', dpi=300, bbox_inches='tight')
