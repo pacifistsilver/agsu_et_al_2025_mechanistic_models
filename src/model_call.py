@@ -6,8 +6,7 @@ import stochpy
 import os
 import sys
 
-from .model_utils import TranscriptionFactor
-from .config_default import SPECIES_NAMES, REACTION_NAMES, SPECIES_MAP
+from .constants import SPECIES_NAMES, REACTION_NAMES, SPECIES_MAP
 from .constants import STATE_STRINGS, SiteState
 from .psc_generator import generate_psc
 
@@ -15,7 +14,6 @@ from .psc_generator import generate_psc
 class ModelCall:
     def __init__(
         self,
-        tfs,
         model_param: dict,
         model_var: dict,
         model_binding_sites: int,
@@ -179,34 +177,32 @@ class ModelCall:
                 curr_partner = site_partners[t_idx, i]
                 
                 if curr_state != prev_state or curr_partner != prev_partner:
-                    if prev_state != "EMPTY":
-                        duration = times[t_idx] - start_t
-                        residence_events.append([
-                            duration,
-                            times[t_idx],
-                            i,
-                            prev_partner,
-                            prev_state,
-                            curr_state,
-                            "STOCHPY_RXN",  # Exact rxn name not tracked explicitly
-                            False if curr_state == "EMPTY" else True
-                        ])
+                    duration = times[t_idx] - start_t
+                    residence_events.append([
+                        duration,
+                        times[t_idx],
+                        i,
+                        prev_partner,
+                        prev_state,
+                        curr_state,
+                        "STOCHPY_RXN",  # Exact rxn name not tracked explicitly
+                        False if prev_state == "EMPTY" else True
+                    ])
                     start_t = times[t_idx]
                     prev_state = curr_state
                     prev_partner = curr_partner
                     
             # Handle end of simulation
-            if prev_state != "EMPTY":
-                residence_events.append([
-                    times[-1] - start_t,
-                    times[-1],
-                    i,
-                    prev_partner,
-                    prev_state,
-                    "STILL_BOUND",
-                    "END_OF_SIMULATION",
-                    True
-                ])
+            residence_events.append([
+                times[-1] - start_t,
+                times[-1],
+                i,
+                prev_partner,
+                prev_state,
+                "STILL_BOUND",
+                "END_OF_SIMULATION",
+                False if prev_state == "EMPTY" else True
+            ])
 
         df_dwell = pl.DataFrame(
             residence_events,

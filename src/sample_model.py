@@ -14,10 +14,9 @@ import json
 import polars as pl
 import concurrent.futures
 import numpy as np
-from . import config_default as config
+from . import config
 from scipy.stats import qmc
 from .model_call import ModelCall
-from .model_utils import TranscriptionFactor
 
 
 output = config.out_dir
@@ -35,14 +34,7 @@ def run_and_save_trajectory(
 ):
     """Wrapper to run the model, tag the data, and save to Parquet."""
     
-    is_sox2_activator = activator_tf.lower() in ["sox2", "both"]
-    is_nanog_activator = activator_tf.lower() in ["nanog", "both"]
-
-    SOX2 = TranscriptionFactor(id=1, name="SOX2", valency=2, is_activator=is_sox2_activator)
-    NANOG = TranscriptionFactor(id=2, name="NANOG", valency=2, is_activator=is_nanog_activator)
-    
     model = ModelCall(
-        tfs=[SOX2, NANOG],
         model_param=sample_params["rates"],
         model_var=sample_params["initial_state"],
         model_binding_sites=model_binding_sites,
@@ -260,15 +252,7 @@ def run_single_parameter_set(
 def execute_simulation(run_id: int, param_set: dict, activator_tf: str = "sox2") -> dict:
     """Purely runs the math and returns raw data in memory."""
     
-    is_sox2_activator = activator_tf.lower() in ["sox2", "both"]
-    is_nanog_activator = activator_tf.lower() in ["nanog", "both"]
-    
-    # Define biology
-    SOX2 = TranscriptionFactor(id=1, name="SOX2", valency=2, is_activator=is_sox2_activator)
-    NANOG = TranscriptionFactor(id=2, name="NANOG", valency=2, is_activator=is_nanog_activator)
-    
     model = ModelCall(
-        tfs=[SOX2, NANOG], # Add biology
         model_param=param_set["rates"],
         model_var=param_set["initial_state"],
         model_binding_sites=10, # Add missing arg

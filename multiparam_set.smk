@@ -4,13 +4,16 @@ from scipy.stats import qmc
 
 sys.path.append("src")
 
-# snakemake --cores all -s multiparam_set.smk  --config exp=src/config/hetmer_excl.yaml
+# snakemake --cores all -s multiparam_set.smk  --config exp=hetmer_excl
 
-configfile: config.get("exp", "src/config/hetmer_excl.yaml")
+EXP_NAME = config.get("exp", "hetmer_excl")
+with open("src/experiments.yaml", "r") as f:
+    import yaml
+    exp_config = yaml.safe_load(f).get(EXP_NAME, {})
 
-NUM_SAMPLES = config.get("num_samples", 1)
-SUBSET_SIZE = config.get("subset_size", 25)
-OUTDIR = config.get("output_dir", "heterodimer")
+NUM_SAMPLES = exp_config.get("num_samples", 1)
+SUBSET_SIZE = exp_config.get("subset_size", 25)
+OUTDIR = exp_config.get("output_dir", "heterodimer")
 
 sampler = qmc.LatinHypercube(d=2, seed=42)
 sample = sampler.random(n=NUM_SAMPLES)
@@ -33,7 +36,7 @@ rule simulate:
         kbn="{kbn}",
         kbs="{kbs}",
         outdir=OUTDIR,  
-        config_path=config.get("exp", "src/config/hetmer_excl.yaml")
+        exp_name=EXP_NAME
     threads: 8
     log:
         f"{OUTDIR}/logs/simulate/kbn_{{kbn}}_kbs_{{kbs}}.log"

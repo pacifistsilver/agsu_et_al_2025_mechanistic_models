@@ -1,0 +1,99 @@
+dimer_10mix:
+  experiment_name: "heterodimer_only"
+  sim_time: 1000
+  num_samples: 2
+  rates:
+    k_bind_s: 1.0
+    k_unbind_s: 0.06
+    k_bind_n: 0.1
+    k_unbind_n: 0.2
+    k_prod_m: 1.0
+    k_deg_m: 0.53
+  initial_state:
+    nanog_sox2_dimer_free: 1
+    nanog_nanog_dimer_free: 9
+  output_dir: "dimer_10mix"
+  activator_tf: "sox2"
+
+dimer_50mix:
+  experiment_name: "heterodimer_only"
+  sim_time: 1000
+  num_samples: 2
+  rates:
+    k_bind_s: 1.0
+    k_unbind_s: 0.06
+    k_bind_n: 0.1
+    k_unbind_n: 0.2
+    k_prod_m: 1.0
+    k_deg_m: 0.53
+  initial_state:
+    nanog_sox2_dimer_free: 5
+    nanog_nanog_dimer_free: 5
+  output_dir: "dimer_50mix"
+  activator_tf: "sox2"
+
+dimer_90mix:
+  experiment_name: "heterodimer_only"
+  sim_time: 1000
+  num_samples: 2
+  rates:
+    k_bind_s: 1.0
+    k_unbind_s: 0.06
+    k_bind_n: 0.1
+    k_unbind_n: 0.2
+    k_prod_m: 1.0
+    k_deg_m: 0.53
+  initial_state:
+    nanog_sox2_dimer_free: 9
+    nanog_nanog_dimer_free: 1
+  output_dir: "dimer_90mix"
+  activator_tf: "sox2"
+
+hetmer_excl:
+  experiment_name: "heterodimer_only"
+  sim_time: 1000
+  num_samples: 2
+  rates:
+    k_bind_s: 1.0
+    k_unbind_s: 0.06
+    k_bind_n: 0.1
+    k_unbind_n: 0.2
+    k_prod_m: 1.0
+    k_deg_m: 0.53
+  initial_state:
+    nanog_sox2_dimer_free: 1
+  output_dir: "hetmer_excl"
+  activator_tf: "sox2"
+
+hodmer_excl:
+  experiment_name: "homodimer_only"
+  sim_time: 1000
+  num_samples: 2
+  rates:
+    k_bind_s: 1.0
+    k_unbind_s: 0.06
+    k_bind_n: 0.1
+    k_unbind_n: 0.2
+    k_prod_m: 1.0
+    k_deg_m: 0.53
+  initial_state:
+    nanog_nanog_dimer_free: 1
+  output_dir: "hodmer_excl"
+  activator_tf: "sox2"
+
+monomer_excl:
+  experiment_name: "homodimer_only"
+  sim_time: 1000
+  num_samples: 2
+  rates:
+    k_bind_s: 1.0
+    k_unbind_s: 0.06
+    k_bind_n: 0.1
+    k_unbind_n: 0.2
+    k_prod_m: 1.0
+    k_deg_m: 0.53
+  initial_state:
+    sox2_monomer_free: 1
+    nanog_monomer_free: 1
+  output_dir: "monomer_excl"
+  activator_tf: "sox2"

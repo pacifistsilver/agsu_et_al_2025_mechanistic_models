@@ -1,6 +1,6 @@
 import sys
 sys.path.append("src")
-from expression_model.config_default import model_param, model_var
+from src.config import model_param, model_var
 
 configfile: config.get("exp", "src/config/default.yaml")
 

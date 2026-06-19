@@ -2,7 +2,7 @@ import os
 import glob
 import json
 import polars as pl
-from . import config_default as config
+from . import config
 from .eda_functions import Statistics
 
 

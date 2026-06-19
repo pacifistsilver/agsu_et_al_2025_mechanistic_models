@@ -3,12 +3,9 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.model_call import ModelCall
-from src.config_default import model_param, model_var
-from src.model_utils import TranscriptionFactor
+from src.config import model_param, model_var
 import numpy as np
 
-SOX2 = TranscriptionFactor(id=1, name="SOX2", valency=2, is_activator=True)
-NANOG = TranscriptionFactor(id=2, name="NANOG", valency=2, is_activator=False)
 
 rates = model_param.copy()
 rates['k_s_in'] = 10.0
@@ -26,11 +23,10 @@ rates['k_n_out'] = 0.5
 
 print("Initializing model...")
 model = ModelCall(
-    tfs=[SOX2, NANOG],
     model_param=rates,
     model_var=model_var,
     model_binding_sites=10,
-    sim_max_time=1000  # Will be interpreted as steps if we change model_call
+    sim_max_time=100
 )
 
 print("Running trajectory...")

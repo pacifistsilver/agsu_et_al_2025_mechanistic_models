@@ -1,8 +1,5 @@
 """
-Centralised configuration loading and merging utilities.
-
-This module provides functions to load YAML config files and merge them with
-default values, avoiding code duplication across scripts.
+Centralised configuration management, combining defaults and YAML loader.
 """
 
 import yaml
@@ -11,18 +8,38 @@ from typing import Dict, Tuple, Optional
 
 from . import constants
 
-def load_yaml_config(config_path: str) -> Dict[str, any]:
+# Legacy config_default parameters for LHS/compilation
+param_perturb_map = [
+    ("k_unbind_s", 0),
+]
+l_bounds = [0.1]
+u_bounds = [1.0]
+dimensions = 1
+optimization = "random-cd"
+samples = 100
+out_dir = "output"
+
+model_var = constants.INITIAL_STATE_DEFAULTS
+model_param = constants.RATE_CONSTANTS_DEFAULTS
+
+def load_yaml_config(experiment_name: str, config_path: str = "src/experiments.yaml") -> Dict[str, any]:
     """
-    Load and parse a YAML configuration file.
+    Load and parse a specific experiment from the experiments YAML file.
 
     Args:
+        experiment_name: Name of the experiment block to load.
         config_path: Path to the YAML config file
 
     Returns:
         Parsed YAML as a dictionary
     """
     with open(config_path, "r") as f:
-        return yaml.safe_load(f) or {}
+        all_configs = yaml.safe_load(f) or {}
+    
+    if experiment_name not in all_configs:
+        raise ValueError(f"Experiment '{experiment_name}' not found in {config_path}")
+        
+    return all_configs[experiment_name]
 
 
 def merge_with_defaults(
@@ -41,15 +58,12 @@ def merge_with_defaults(
     Returns:
         Tuple of (final_rates, final_initial_state) dicts
     """
-    # Start with defaults
     final_rates: Dict[str, float] = dict(constants.RATE_CONSTANTS_DEFAULTS)
     final_init_state: Dict[str, int] = dict(constants.INITIAL_STATE_DEFAULTS)
 
-    # Override with config values
     final_rates.update(config.get("rates", {}))
     final_init_state.update(config.get("initial_state", {}))
 
-    # Override with explicit custom values (highest priority)
     if custom_rates:
         final_rates.update(custom_rates)
     if custom_init_state:
@@ -58,7 +72,7 @@ def merge_with_defaults(
     return final_rates, final_init_state
 
 
-def get_sim_parameters(config: Dict[str, any]) -> Dict[str, int | float]:
+def get_sim_parameters(config: Dict[str, any]) -> Dict[str, any]:
     """
     Extract simulation parameters from config with sensible defaults.
 
@@ -74,29 +88,3 @@ def get_sim_parameters(config: Dict[str, any]) -> Dict[str, int | float]:
         "binding_sites": config.get("binding_sites", constants.MODEL_DEFAULTS["total_binding_sites"]),
         "burn_in_fraction": config.get("burn_in_fraction", constants.MODEL_DEFAULTS["burn_in_fraction"]),
     }
-
-
-def get_output_dir(config: Dict[str, any]) -> str:
-    """
-    Get output directory from config or return default.
-
-    Args:
-        config: Loaded YAML configuration dict
-
-    Returns:
-        Output directory path
-    """
-    return config.get("output_dir", "output")
-
-
-def get_experiment_name(config: Dict[str, any]) -> str:
-    """
-    Get experiment name from config or return default.
-
-    Args:
-        config: Loaded YAML configuration dict
-
-    Returns:
-        Experiment name string
-    """
-    return config.get("experiment_name", "default_experiment")

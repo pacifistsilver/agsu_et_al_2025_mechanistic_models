@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath("."))
 
-from src.config_loader import load_yaml_config, merge_with_defaults, get_sim_parameters
+from src.config import load_yaml_config, merge_with_defaults, get_sim_parameters
 from src.sample_model import run_single_parameter_set
 
 if __name__ == "__main__":
@@ -12,7 +12,7 @@ if __name__ == "__main__":
     base_outdir = snakemake.params.outdir
     param_set_id = f"sweep/kbn_{kbn:.2f}_kbs_{kbs:.2f}"
 
-    cfg = load_yaml_config(snakemake.params.config_path)
+    cfg = load_yaml_config(snakemake.params.exp_name)
 
     final_rates, final_state = merge_with_defaults(
         cfg,
