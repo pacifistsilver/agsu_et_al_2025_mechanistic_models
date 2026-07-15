@@ -10,6 +10,7 @@ def plot_solution_and_domain(measurement, domains):
     """
     import pylab
     # plot the solution
+    pylab.figure(figsize=(10, 10))
     shape = (41, 41)
     for i, (t, distribution) in enumerate(zip(measurement.times, measurement.distributions)):
         pylab.subplot(3, 3, i + 1)
@@ -19,7 +20,8 @@ def plot_solution_and_domain(measurement, domains):
             interpolation = 'nearest',
             origin = 'lower'
         )
-    pylab.figure()
+    pylab.tight_layout()
+    pylab.figure(figsize=(10, 10))
     # plot the states in the domain
     for i, (t, domain) in enumerate(zip(measurement.times, domains)):
         pylab.subplot(3, 3, i + 1)
@@ -27,6 +29,7 @@ def plot_solution_and_domain(measurement, domains):
         pylab.scatter(domain_x, domain_y, marker = 'o', c = 'k', s = 6)
         pylab.xlim(0, 45)
         pylab.ylim(0, 45)
+    pylab.tight_layout()
     pylab.show()
 
 def plot_solution_and_domain_5d(measurement, domains, dim1=4, dim2=3, shape=(80, 2)):
@@ -42,6 +45,7 @@ def plot_solution_and_domain_5d(measurement, domains, dim1=4, dim2=3, shape=(80,
     ncols = math.ceil(math.sqrt(n_plots))
     nrows = math.ceil(n_plots / ncols) if ncols > 0 else 1
 
+    pylab.figure(figsize=(ncols * 3, nrows * 2.5))
     # plot the solution
     for i, (t, distribution) in enumerate(zip(measurement.times, measurement.distributions)):
         pylab.subplot(nrows, ncols, i + 1)
@@ -53,9 +57,10 @@ def plot_solution_and_domain_5d(measurement, domains, dim1=4, dim2=3, shape=(80,
             origin = 'lower',
             aspect = 'auto'
         )
-        pylab.title('Sol t=%g' % t)
+        pylab.title('Sol t=%.3g' % t)
     
-    pylab.figure()
+    pylab.tight_layout()
+    pylab.figure(figsize=(ncols * 3, nrows * 2.5))
     # plot the states in the domain
     for i, (t, domain) in enumerate(zip(measurement.times, domains)):
         pylab.subplot(nrows, ncols, i + 1)
@@ -73,5 +78,6 @@ def plot_solution_and_domain_5d(measurement, domains, dim1=4, dim2=3, shape=(80,
         pylab.scatter(domain_x, domain_y, marker = 'o', c = 'k', s = 6)
         pylab.xlim(0, shape[0])
         pylab.ylim(-0.5, shape[1] - 0.5)
-        pylab.title('Dom t=%g' % t)
+        pylab.title('Dom t=%.3g' % t)
+    pylab.tight_layout()
     pylab.show()

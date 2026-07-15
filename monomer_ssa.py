@@ -43,7 +43,7 @@ if __name__ == "__main__":
     times, states = gil.gillespie(
         initial_state, stoichiometry, propensity_fn, t_max=t_max, parameters=params
     )
-    promoter_idx = [1, 2]
+    promoter_idx = [2, 3]
     active_start = 1
     active_end = 100
     on_times, off_times = gil.extract_on_off(times, states, promoter_idx, active_start, active_end)
@@ -59,8 +59,8 @@ if __name__ == "__main__":
     # 6. Plot the time course
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 9))
 
-    ax1.step(times, states[:, 2], label="Bound SOX2 ($n_s$)", color="blue")
-    ax1.step(times, states[:, 3], label="Bound NANOG ($n_n$)", color="green")
+    ax1.step(times, states[:, 2], label="Bound NANOG ($n_n$)", color="green")
+    ax1.step(times, states[:, 3], label="Bound SOX2 ($n_s$)", color="blue")
     ax1.set_ylabel("Bound TFs")
     ax1.legend(loc="upper right")
     ax1.grid(True, linestyle="--", alpha=0.6)

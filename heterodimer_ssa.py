@@ -51,7 +51,7 @@ def propensity_fn(state, p_params):
 
 
 if __name__ == "__main__":
-    t_max = 100
+    t_max = 500
     print("Running Gillespie simulation for n10, n01, n11 model...")
     times, states = gil.gillespie(
         initial_state,

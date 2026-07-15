@@ -40,10 +40,8 @@ def main():
     # this problem is initially stiff so
     # we begin with some finer time steps
     # before changing to coarser steps
-    time_steps = numpy.concatenate((
-        numpy.linspace(0.0, 1.0, 10),
-        numpy.linspace(2.0, 100, 100)
-    ))
+    time_steps = numpy.linspace(1, 50, 50)
+
     
     # we want the error of the solution at the
     # final time to be bounded by epsilon
