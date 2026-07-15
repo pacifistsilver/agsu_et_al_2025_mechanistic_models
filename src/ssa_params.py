@@ -7,14 +7,14 @@ import gillespie as gil
 heterodimer_params = [
     {
         "alpha_s": 0.5, #0.5
-        "beta_s": 0.2, # 0.06
+        "beta_s": 0.06, # 0.06
         "alpha_n": 0.3, # 0.3
         "beta_n": 0.2, # 0.2
         "k_y": 1,
         "gamma_y": 2,
         "mean_burst_size": 5,
     },
-    [10, 0, 0, 0, 0],  # [n00, n10, n01, n11, y]
+    [1, 0, 0, 0, 0],  # [n00, n10, n01, n11, y]
     [
         [-1, 1, 0, 0, 0],  
         [-1, 0, 1, 0, 0],  
@@ -34,8 +34,8 @@ monomer_params = [
         "beta_s": 0.06,
         "alpha_n": 0.3,
         "beta_n": 0.2,
-        "k_y": 1,
-        "gamma_y": 2,
+        "k_y": 0.1,
+        "gamma_y": 0.5,
         "mean_burst_size": 5,
     },
     [1, 9, 0, 0, 0], # nanogfree, sox2free, nanogbound, sox2bound, y
@@ -51,7 +51,7 @@ homodimer_params = [
         "gamma_y": 2,
         "mean_burst_size": 5,
     },
-    [10, 0, 0, 0, 0],  # [n00, n10, n01, n11, y]
+    [1, 0, 0, 0, 0],  # [n00, n10, n01, n11, y]
     [
         [-1, 1, 0, 0, 0],  # n00 -> n10
         [-1, 0, 1, 0, 0],  # n00 -> n01

@@ -89,7 +89,6 @@ def gillespie(
         # Update state and time
         if is_static:
             state += stoich[reaction_idx]
-            print(state)
         else:
             change = stoich[reaction_idx]
             if callable(change):
@@ -145,15 +144,13 @@ def extract_on_off(times, states, species_idx, active_start, active_end):
         Durations spent in the OFF (inactive) state.
     """
     # Identify ON states (1) and OFF states (0)
-    promoter_states = np.sum(states[:, species_idx[0:-1]], axis=1)
+    promoter_states = np.sum(states[:, species_idx], axis=1)
     is_on = (promoter_states >= active_start) & (promoter_states <= active_end)
 
     # Find indices where state changes
     # A change happens between i and i+1 when is_on[i] != is_on[i+1]
     # So the new state starts at index `change + 1`
     changes = np.where(is_on[:-1] != is_on[1:])[0]
-    print(changes)
-    print(is_on[:-1], is_on[1:])
     on_times = []
     off_times = []
     
