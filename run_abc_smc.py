@@ -1,27 +1,19 @@
 import pymc as pm
 import numpy as np
 import polars as pl
-from abc_smc import pymc_fast_simulator, pymc_fast_simulator_het
+from abc_smc import pymc_fast_simulator_monomer, pymc_fast_simulator_het, summary_stat
 from src.ssa_params import monomer_params
 from pymc_extras.model_builder import ModelBuilder
 from typing import Dict
 
 initial_params, _, _ = monomer_params
-observed_data = np.load(file="sim_data.npy")
-nanog_data = np.load(file="./data/nanog.npy")
-sox2_data=np.load(file="./data/sox2.npy")
+synthetic_data = np.load(file="./data/synthetic_data/synthetic_heterodimer_data.npy")
+nanog = np.load(file="./data/nanog.npy")
+sox2=np.load(file="./data/sox2.npy")
+rex1=np.load(file="./data/rex1.npy")
+esrrb=np.load(file="./data/esrrb.npy")
 
-def my_summary_stats(data):
-    mean = np.mean(data)
-    var = np.var(data)
-    fano = var/mean if mean>0 else 0.0
-    cv = np.sqrt(var)/mean if mean>0 else 0.0
-    return np.log1p(np.array([mean, var, fano, cv]))
-
-observed_stats = my_summary_stats(nanog_data)
-observed_stats_sox2 = my_summary_stats(sox2_data)
-observed_stats_nanog = my_summary_stats(nanog_data)
-
+array = [sox2, nanog, rex1]
 
 class MonomerModel(ModelBuilder):
     model_type = "MonomerModel"
@@ -42,12 +34,12 @@ class MonomerModel(ModelBuilder):
         It will be passed to the class instance on initialization, in case the user doesn't provide any model_config of their own.
         """
         model_config: Dict = {
-            "alpha_s": 0.5,
-            "alpha_n": 0.3,
-            "beta_s": 0.06,
-            "beta_n": 0.2,
-            "gamma_y": 1.0,
-            "k_y": 10.0
+            "alpha_s_sigma": 1,
+            "alpha_n_sigma": 1,
+            "beta_s_sigma": 0.05,
+            "beta_n_sigma": 0.1,
+            "gamma_y_sigma": 0.1,
+            "k_y_sigma": 0.1
         }
         return model_config
 
@@ -60,7 +52,7 @@ class MonomerModel(ModelBuilder):
         """
         sampler_config: Dict = {
             "draws": 1000,
-            "tune": 100,
+            "tune": 1000,
             "chains": 5,
             "target_accept": 0.95,
         }
@@ -68,20 +60,19 @@ class MonomerModel(ModelBuilder):
 
     def build_model(self, X=None, y=None, **kwargs):       
         with pm.Model() as self.model:
-            alpha_s = pm.HalfNormal("alpha_s", sigma=1.0)
-            alpha_n = pm.HalfNormal("alpha_n", sigma=1.0)    
-            beta_s = pm.HalfNormal("beta_s", sigma=0.5)    
-            beta_n = pm.HalfNormal("beta_n", sigma=0.8)    
-            k_y = pm.HalfNormal("k_y", sigma=0.01)
-            gamma_y = pm.HalfNormal("gamma_y", sigma=0.01)
+            cfg = self.model_config
+            alpha_s = pm.Uniform("alpha_s", lower = 0, upper=cfg["alpha_s_sigma"])    
+            alpha_n = pm.Uniform("alpha_n", lower = 0, upper=cfg["alpha_n_sigma"])    
+            k_y = pm.Uniform("k_y", lower = 0, upper=cfg["k_y_sigma"])
+            gamma_y = pm.Uniform("gamma_y", lower = 0, upper=cfg["gamma_y_sigma"])
 
             sim = pm.Simulator(
                 "sim", 
-                pymc_fast_simulator, 
-                params=(alpha_s, beta_s, alpha_n, beta_n, k_y, gamma_y), 
-                distance="laplace",
-                epsilon=np.array([1.0, 4.0, 0.25, 0.04]),
-                observed=observed_stats
+                pymc_fast_simulator_monomer, 
+                params=(alpha_s, alpha_n, k_y, gamma_y), 
+                sum_stat=summary_stat,
+                epsilon = 5,
+                observed=synthetic_data
             )
                 
     def fit(self, data: pl.DataFrame, sampler_config: dict = None, **kwargs):
@@ -95,11 +86,21 @@ class MonomerModel(ModelBuilder):
             # Use pm.sample_smc for Sequential Monte Carlo
             self.idata = pm.sample_smc(
                 draws=sampler_config["draws"],
-                chains=sampler_config["chains"],
                 **kwargs
             )
 
+            prior_distribution = pm.sample_prior_predictive(draws = 500, random_seed=500)
+            log_likelihood = pm.compute_log_likelihood(self.idata)
+            log_prior = pm.stats.compute_log_prior(self.idata)
+
+            if "prior" in prior_distribution:
+                self.idata["prior"] = prior_distribution["prior"]
+            if "prior_predictive" in prior_distribution:
+                self.idata["prior_predictive"] = prior_distribution["prior_predictive"]
+            self.idata["log_likelihood"] = log_likelihood["log_likelihood"]
+            self.idata["log_prior"] = log_prior["log_prior"]
         return self.idata
+
     
     def save(self, fname: str):
         """
@@ -159,12 +160,12 @@ class DimerModel(ModelBuilder):
         It will be passed to the class instance on initialization, in case the user doesn't provide any model_config of their own.
         """
         model_config: Dict = {
-            "alpha_s": 0.5,
-            "alpha_n": 0.3,
-            "beta_s": 0.06,
-            "beta_n": 0.2,
-            "gamma_y": 1.0,
-            "k_y": 10.0
+            "alpha_s_sigma": 1.0,
+            "alpha_n_sigma": 1.0,
+            "beta_s_sigma": 0.1,
+            "beta_n_sigma": 0.3,
+            "gamma_y_sigma": 0.01,
+            "k_y_sigma": 0.5,
         }
         return model_config
 
@@ -177,30 +178,28 @@ class DimerModel(ModelBuilder):
         """
         sampler_config: Dict = {
             "draws": 500,
-            "tune": 100,
+            "tune": 1000,
             "chains": 5,
             "target_accept": 0.95,
         }
         return sampler_config
 
-    def build_model(self, X=None, y=None, **kwargs):
+    def build_model(self, X=None, y=None, **kwargs):       
         with pm.Model() as self.model:
-            alpha_s = pm.HalfNormal("alpha_s", sigma=1.0)
-            alpha_n = pm.HalfNormal("alpha_n", sigma=1.0)    
-            beta_s = pm.HalfNormal("beta_s", sigma=0.5)    
-            beta_n = pm.HalfNormal("beta_n", sigma=0.8)    
-            k_y = pm.HalfNormal("k_y", sigma=0.01)
-            gamma_y = pm.HalfNormal("gamma_y", sigma=0.01)
+            cfg = self.model_config
+            alpha_s = pm.HalfNormal("alpha_s", sigma=cfg["alpha_s_sigma"]) 
+            alpha_n = pm.HalfNormal("alpha_n", sigma=cfg["alpha_n_sigma"]) 
+            beta_s = pm.HalfNormal("beta_s", sigma=cfg["beta_s_sigma"])   
+            beta_n = pm.HalfNormal("beta_n", sigma=cfg["beta_n_sigma"])   
 
             sim = pm.Simulator(
                 "sim", 
                 pymc_fast_simulator_het, 
-                params=(alpha_s, beta_s, alpha_n, beta_n, k_y, gamma_y), 
-                distance="laplace",
-                epsilon=np.array([1.0, 4.0, 0.25, 0.04]),
-                observed=y
-            )
-            
+                params=(alpha_s, alpha_n, beta_s, beta_n), 
+                sum_stat=summary_stat,
+                epsilon = 1,
+                observed=synthetic_data
+            )            
                 
     def fit(self, data: pl.DataFrame, sampler_config: dict = None, **kwargs):
         """Override fit to use SMC instead of the default NUTS sampler"""
@@ -213,11 +212,18 @@ class DimerModel(ModelBuilder):
             # Use pm.sample_smc for Sequential Monte Carlo
             self.idata = pm.sample_smc(
                 draws=sampler_config["draws"],
-                chains=sampler_config["chains"],
                 **kwargs
             )
             prior_distribution = pm.sample_prior_predictive(draws = 500, random_seed=500)
-            self.idata.append(prior_distribution)
+            log_likelihood = pm.compute_log_likelihood(self.idata)
+            log_prior = pm.stats.compute_log_prior(self.idata)
+            
+            if "prior" in prior_distribution:
+                self.idata["prior"] = prior_distribution["prior"]
+            if "prior_predictive" in prior_distribution:
+                self.idata["prior_predictive"] = prior_distribution["prior_predictive"]
+            self.idata["log_likelihood"] = log_likelihood["log_likelihood"]
+            self.idata["log_prior"] = log_prior["log_prior"]
 
         return self.idata
     
@@ -260,10 +266,12 @@ class DimerModel(ModelBuilder):
         super().save(fname)
 
 
-if __name__ == '__main__':
+if __name__ == '__main__':  
     # Instantiate the model
-    model = MonomerModel()
-    idata = model.fit(observed_data)
-    fname = "monomer_synthetic_fit1.nc"
+    model = DimerModel()    
+    idata = model.fit(nanog)
+    cfg = model.model_config
+    fname = f"nanog.nc"
     model.save(fname)
+
     
