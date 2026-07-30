@@ -1,0 +1,12 @@
+# Normalise line endings. The vendored CME solver arrived with CRLF, which made
+# every touched file show as fully rewritten in diffs.
+* text=auto eol=lf
+
+*.png binary
+*.svg text eol=lf
+*.npy binary
+*.nc binary
+*.parquet binary
+
+# Notebooks: keep diffs readable, and never merge them automatically.
+*.ipynb text eol=lf merge=binary

@@ -1,10 +1,7 @@
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
 
 # Distribution / packaging
@@ -15,26 +12,12 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
-parts/
 sdist/
-var/
 wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 htmlcov/
@@ -43,45 +26,13 @@ htmlcov/
 .coverage
 .coverage.*
 .cache
-nosetests.xml
 coverage.xml
 *.cover
-*.py,cover
 .hypothesis/
 .pytest_cache/
 
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-target/
-
-# Jupyter Notebook
+# Jupyter
 .ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
 
 # Environments
 .env
@@ -89,10 +40,10 @@ ipython_config.py
 env/
 venv/
 ENV/
-env.bak/
-venv.bak/
+.conda/
+.python-version
 
-# IDEs
+# IDEs / OS
 .vscode/
 .idea/
 *.swp
@@ -105,15 +56,36 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
-# plots and logs
-*.png
-*.csv
-*.html
-*.parquet
+# ---------------------------------------------------------------------------
+# Project outputs and data
+#
+# Extension bans are scoped to directories rather than global. The previous
+# global `*.png` / `*.csv` / `*.json` rules meant the paper's own figures could
+# not be committed, and silently swallowed config files.
+# ---------------------------------------------------------------------------
+
+# Raw data is downloaded, never committed (see scripts/download_data.py)
+/data/raw/
+/data/*.csv
+
+# Inference traces and simulation outputs are regenerated
+/results/
+*.nc
+
+# Snakemake and scratch
+/.snakemake/
+/.archive/
+/output/
 *.log
-*.json
-*.documentation
-.DS_Store
-/output
-/.snakemake
-/.archive
+
+# Editor-local Claude settings
+/.claude/
+
+# Orphaned diagnostic plot dumps with no generating script in the repo. Kept
+# on disk but untracked; regenerate from notebooks/05_abc_diagnostics.ipynb or
+# delete. See the PR discussion.
+/bmb_chp02_plots/
+/exploratory_plots/
+/ppc_plots/
+
+# figures/output/ IS tracked: it holds the publication figures.

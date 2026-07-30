@@ -1,0 +1,22 @@
+# Install with: pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.7.1
+    hooks:
+      # Notebook outputs previously pushed abc-notebook.ipynb to 2 MB and put
+      # two multi-megabyte copies into git history.
+      - id: nbstripout
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-added-large-files
+        # The raw GEO tables are ~99 MB each and must never be committed again.
+        args: [--maxkb=2048]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict

@@ -1,9 +1,0 @@
-numpy
-pandas
-polars
-scipy
-seaborn
-matplotlib
-pyarrow
-snakemake
-numba

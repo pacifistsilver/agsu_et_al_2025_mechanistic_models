@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stochtf"
+version = "1.0.0"
+description = "Stochastic modelling of NANOG/SOX2 dynamics in gene expression noise"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "G. G. Agsu" }]
+keywords = ["gene expression", "transcription factors", "stochastic modelling",
+            "chemical master equation", "ABC-SMC"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Programming Language :: Python :: 3",
+]
+
+# Core dependencies: everything needed to run the analytical results, the SSA,
+# the CME solver and the figure scripts.
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "pandas>=2.0",
+    "polars>=0.20",
+    "seaborn>=0.12",
+    "numba>=0.58",
+    "pyarrow>=14.0",
+]
+
+[project.optional-dependencies]
+# Bayesian inference stack. Split out because it is heavy and only
+# scripts/run_abc_smc.py and notebook 05 need it.
+inference = [
+    "pymc>=5.10",
+    "pymc-extras>=0.1",
+    "arviz>=0.17",
+]
+# Data preparation: fetching from Ensembl/GEO and gene-symbol mapping.
+data = [
+    "mygene>=3.2",
+]
+dev = [
+    "pytest>=7.4",
+    "nbstripout>=0.6",
+]
+all = ["stochtf[inference,data,dev]"]
+
+[project.urls]
+Publication = "https://doi.org/10.64898/2025.12.03.691924"
+Repository = "https://github.com/pacifistsilver/Srinjan_Modelling"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+markers = [
+    "slow: stochastic checks that run many SSA replicates (deselect with '-m \"not slow\"')",
+]

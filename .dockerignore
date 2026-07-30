@@ -1,10 +1,19 @@
-.venv/
-__pycache__/
-output/
-.snakemake/
 .git/
-tests/
+.venv/
+.conda/
+__pycache__/
+*.py[cod]
 .pytest_cache/
-scratch/
-notebooks/
-hetmer_excl/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Large local state that must never enter the build context
+.snakemake/
+.archive/
+data/raw/
+data/*.csv
+results/
+output/
+*.nc
+
+.DS_Store
