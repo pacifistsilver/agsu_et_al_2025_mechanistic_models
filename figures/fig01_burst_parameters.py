@@ -1,4 +1,4 @@
-"""Plots of burst frequency and burst size for the two-site OR-gate promoter."""
+"""Plots of burst frequency and burst size for the heterodimer model."""
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,7 +14,7 @@ gamma, k_y = 1.0, 20.0          # time in mRNA lifetimes
 
 fig, ax = plt.subplots(2, 3, figsize=(11.5, 6.6))
 al = np.logspace(-2.5, 2.5, 600)
-betas = [(1, 0.00001), (0.05, 0.2), (0.05, 0.04)]
+betas = [(1, 1), (0.05, 0.2), (0.05, 0.04)]
 
 # (a) burst frequency along the symmetric line alpha_s = alpha_n
 for i, (bs, bn) in enumerate(betas):
@@ -55,7 +55,8 @@ for yv in [0.3, 3, 30]:
                   fontsize=6.5, color="0.45", rotation=-45,
                   ha="left", va="top")
 ax[0, 2].set_xlabel(r"$f/\gamma$"); ax[0, 2].set_ylabel(r"$b$")
-
+ax[0, 2].set_ylim(2)
+ax[0, 2].set_xlim(1e-3)
 # (d,e) full (alpha_s, alpha_n) plane at fixed betas
 bs, bn = 0.05, 0.2
 g = np.logspace(-2.5, 2.5, 260)
@@ -82,7 +83,7 @@ ax[1, 0].text(0.04, 0.05, r"$\partial f/\partial\alpha_s\propto\beta_s-\alpha_n$
 
 # (f) how much of the expression is burst-like
 al2 = np.logspace(-2.5, 2.5, 400)
-bs, bn = 3, 8
+bs, bn = 0.05, 0.2
 ax[1, 2].loglog(al2, ts.mean_y(al2, bs, al2, bn, k_y, gamma), color=C[0], lw=1.7,
                 label=r"$\langle y\rangle$")
 ax[1, 2].loglog(al2, ts.fano(al2, bs, al2, bn, k_y, gamma), color=C[1], lw=1.7,
