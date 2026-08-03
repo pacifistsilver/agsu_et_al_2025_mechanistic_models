@@ -69,11 +69,42 @@ python scripts/run_fsp.py burr08 --expander support
 ```
 
 ```bash
-python scripts/run_abc_smc.py --gene esrrb --model dimer
+python scripts/run_inference.py --gene esrrb --model dimer
 ```
 
 Traces are written to `results/` and analysed in
 `notebooks/05_abc_diagnostics.ipynb`.
+
+### Inference uses the exact distribution, not a simulator
+
+`stochtf.analytical.pgf` computes the stationary count distribution exactly, so
+`scripts/run_inference.py` scores the whole distribution
+(`log L = Σᵢ log P(yᵢ | θ)`) rather than comparing a Gillespie run to the data
+through a summary statistic. There is no ABC tolerance to tune and no Monte
+Carlo noise in the likelihood; sampling is still SMC.
+
+The generating function `G(z) = E[z^y]` satisfies `γu·dG/du = Qᵀ G + u K G` with
+`u = z − 1`. From that one equation:
+
+```python
+from stochtf.analytical import pgf
+
+pgf.moments(0.5, 0.05, 0.3, 0.2, k_y=30.0, gamma=1.0, gate="OR")
+# (mean, variance, Fano) -- exact, no truncation
+
+pgf.stationary_pmf(0.5, 0.05, 0.3, 0.2, k_y=30.0, gamma=1.0, gate="OR")
+# full P(y)
+```
+
+The ADD gate (the monomer model) has a closed-form PGF — a product of two
+Kummer functions, since the two sites contribute additively. OR and AND do not,
+so `stationary_pmf` solves the block-tridiagonal stationary CME, which is exact
+for every gate and stable at the k_y/γ ≈ 250 the data implies. All routes agree
+to machine precision; `pgf.pgf_ode` integrates the ODE directly as an
+independent check.
+
+Rates are inferred in units of γ, the mRNA degradation rate: stationary counts
+determine only the ratios, so γ is fixed at 1 and cannot be identified separately.
 
 ## Data
 
@@ -109,7 +140,7 @@ exact FSP, and the single-site limits.
 │   ├── analytical/       closed-form + FSP results for two-site promoters
 │   ├── ssa/              Gillespie simulator, parameters, promoter models
 │   ├── cme/              chemical master equation solver (FSP)
-│   ├── inference/        ABC-SMC models and numba simulators
+│   ├── inference/        exact stationary likelihood + SMC models
 │   ├── plotting.py       shared figure style
 │   └── paths.py          project directory resolution
 ├── figures/              one script per paper figure -> figures/output/

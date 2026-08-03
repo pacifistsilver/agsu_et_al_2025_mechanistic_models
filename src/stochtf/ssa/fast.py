@@ -1,12 +1,24 @@
+"""Numba-compiled Gillespie simulators for the promoter models.
+
+These were the ABC-SMC simulators. Inference now uses the exact stationary
+likelihood (:mod:`stochtf.inference.likelihood`), so they are no longer in that
+path; they are kept because they generate the synthetic validation data and are
+the independent ground truth the analytical results are checked against.
+
+Each returns 10 counts sampled along a single trajectory at
+``t_max/10, ..., t_max``. Those are autocorrelated samples of one cell, not 10
+independent cells -- which was part of why the ABC likelihood was mis-specified.
+"""
+
 import numpy as np
-from numba import njit, prange
+from numba import njit
 
 from stochtf.ssa.params import monomer_params
 
 params, initial_state, stoichiometry = monomer_params
 
 
-@njit(parallel=True)
+@njit
 def fast_ssa_monomer(alpha_s, beta_s, alpha_n, beta_n, k_y, gamma_y, t_max):
     state = np.array([1.0, 1.0, 0.0, 0.0, 0.0])
     t = 0.0
@@ -70,7 +82,7 @@ def fast_ssa_monomer(alpha_s, beta_s, alpha_n, beta_n, k_y, gamma_y, t_max):
         obs_idx += 1
     return mrna_counts
 
-@njit(parallel=True)
+@njit
 def fast_ssa_dimer(alpha_s, beta_s, alpha_n, beta_n, k_y, gamma_y, t_max):
     # state = [n00, n10, n01, n11, y]
     # Initially 1 free promoter (n00), all others 0.
@@ -152,64 +164,3 @@ def fast_ssa_dimer(alpha_s, beta_s, alpha_n, beta_n, k_y, gamma_y, t_max):
         mrna_counts[obs_idx] = state[4]
         obs_idx += 1
     return mrna_counts
-
-@njit(parallel=True)
-def fast_simulator_wrapper(ssa_algorithm, alpha_s, beta_s, alpha_n, beta_n, k_y, gamma_y, t_max, num_cells):
-    results = np.empty((num_cells, 10))
-    for i in prange(num_cells):
-        results[i] = ssa_algorithm(alpha_s, beta_s, alpha_n, beta_n, k_y, gamma_y, t_max)
-    
-    return results.flatten()
-
-
-def pymc_fast_simulator_monomer(rng, alpha_s, alpha_n, beta_s, beta_n, k_y = 0.01, gamma_y = 0.005, t_max=None, num_cells=None, size=None):
-    """
-    Wrapper to bridge PyMC parameters with the Numba function.
-    """
-    a_s = np.asarray(alpha_s).item()
-    b_s = np.asarray(beta_s).item()
-    a_n = np.asarray(alpha_n).item()
-    b_n = np.asarray(beta_n).item()
-    g_y = np.asarray(gamma_y).item()
-    k_y = np.asarray(k_y).item()
-    n_cells = 40
-    return fast_simulator_wrapper(
-        fast_ssa_monomer,
-        a_s, 
-        b_s, 
-        a_n,
-        b_n,
-        k_y,
-        g_y,
-        t_max=1000, 
-        num_cells=n_cells
-    )
-
-def pymc_fast_simulator_het(rng, alpha_s, alpha_n, beta_s, beta_n, k_y = 0.01, gamma_y = 0.005, t_max=None, num_cells=None, size=None):
-    """
-    Wrapper to bridge PyMC parameters with the Numba function.
-    """
-    a_s = np.asarray(alpha_s).item()
-    b_s = np.asarray(beta_s).item()
-    a_n = np.asarray(alpha_n).item()
-    b_n = np.asarray(beta_n).item()
-    g_y = np.asarray(gamma_y).item()
-    k_y = np.asarray(k_y).item()
-    n_cells = 40
-    return fast_simulator_wrapper(
-        fast_ssa_dimer,
-        a_s, 
-        b_s, 
-        a_n,
-        b_n,
-        k_y,
-        g_y,
-        t_max=1000, 
-        num_cells=n_cells
-    )
-
-def summary_stat(x):
-    mean = np.mean(x)
-    var = np.var(x)
-    fano = var / mean if mean > 0 else 0.0
-    return np.log1p(np.array([mean, fano]))

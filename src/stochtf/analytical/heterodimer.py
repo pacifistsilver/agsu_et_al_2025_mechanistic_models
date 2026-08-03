@@ -162,26 +162,6 @@ def fano(a_s, b_s, a_n, b_n, k_y, gamma):
     return 1.0 + k_y * bracket / mean_y(a_s, b_s, a_n, b_n, k_y, gamma, N=1)
 
 
-# ----------------------------------------------------------------------
-# 2. effective ("measured") burst parameters
-#    what you infer if you fit F = 1 + b to data
-# ----------------------------------------------------------------------
-
-
-def burst_size_eff(a_s, b_s, a_n, b_n, k_y, gamma):
-    return fano(a_s, b_s, a_n, b_n, k_y, gamma) - 1.0
-
-
-def burst_frequency_eff(a_s, b_s, a_n, b_n, k_y, gamma):
-    b_eff = burst_size_eff(a_s, b_s, a_n, b_n, k_y, gamma)
-    return gamma * mean_y(a_s, b_s, a_n, b_n, k_y, gamma) / b_eff
-
-
-# ----------------------------------------------------------------------
-# 3. full burst-size distribution (discrete phase-type, 3 phases)
-# ----------------------------------------------------------------------
-
-
 def _phase_type(a_s, b_s, a_n, b_n, k_y):
     """Build the embedded emission chain on transient states [11, 10, 01].
 

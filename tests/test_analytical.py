@@ -141,13 +141,11 @@ def test_gates_module_reproduces_the_exact_fsp_fano():
     assert var / mu == pytest.approx(F_gate, rel=1e-6)
 
 
-def test_effective_parameters_invert_the_fano_relation():
-    """b_eff = F - 1, and <y> = b_eff f_eff / gamma still holds."""
-    F = ts.fano(*PARAMS, K_Y, GAMMA)
-    b_eff = ts.burst_size_eff(*PARAMS, K_Y, GAMMA)
-    f_eff = ts.burst_frequency_eff(*PARAMS, K_Y, GAMMA)
-    assert b_eff == pytest.approx(F - 1, rel=1e-10)
-    assert ts.mean_y(*PARAMS, K_Y, GAMMA) == pytest.approx(b_eff * f_eff / GAMMA, rel=1e-8)
+# The effective-burst-parameter test that lived here covered burst_size_eff and
+# burst_frequency_eff, which have since been removed from heterodimer.py: both
+# were derived from fano(), whose excess term is a factor k_y/gamma too small
+# (see test_closed_form_fano_matches_exact_fsp). stochtf.analytical.pgf.moments
+# gives the corrected Fano factor.
 
 
 def test_single_site_limit():
