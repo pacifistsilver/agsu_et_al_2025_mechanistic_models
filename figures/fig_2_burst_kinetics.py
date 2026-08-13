@@ -54,7 +54,7 @@ a = ax[0, 1]
 a.loglog(betas, M[2]/gamma, color=C_M, lw=1.8, label="M")
 a.loglog(betas, hd[2]/gamma,  color=C_HD,  lw=1.8, label="HD")
 
-a.set_xlabel(r"$k_{off}$ (s$^{-1}$)"); a.set_ylabel("Burst Frequency")
+a.set_xlabel(r"$k_{off}$ (s$^{-1}$)"); a.set_ylabel(r"Burst Frequency ($\gamma^{-1}$)")
 
 # ---- (c) burst size vs alpha
 a = ax[0, 2]
@@ -96,7 +96,7 @@ ax[1, 1].text(0.03, 0.23, "o : $\\alpha^*=\\sqrt{\\beta_s\\beta_n}$\n",
               transform=ax[1, 1].transAxes, fontsize=7, va="top")
 
 
-a.set_xlabel(r"$k_{on}$ (s$^{-1}$)"); a.set_ylabel("Burst Frequency")
+a.set_xlabel(r"$k_{on}$ (s$^{-1}$)"); a.set_ylabel(r"Burst Frequency ($\gamma^{-1}$)")
 
 # ---- (c) burst size vs alpha
 a = ax[1, 2]
