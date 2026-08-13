@@ -16,6 +16,8 @@ frequency by N (burst size and Fano factor are N-independent).
 
 import numpy as np
 
+# alpha = k [sox2:nanog]
+# p00 -> p10, p00 -> p01
 
 def derived(a_s: np.float64, b_s: np.float64, a_n: np.float64, b_n: np.float64) -> tuple:
     """Returns individual probabilities of bound and unbound SOX2/NANOG states.
@@ -37,7 +39,7 @@ def derived(a_s: np.float64, b_s: np.float64, a_n: np.float64, b_n: np.float64) 
     return lam_s, lam_n, p_s1, p_n1, p_s0, p_n0
 
 
-def p00(a_s, b_s, a_n, b_n):
+def p00(a_s_hat, b_s, a_n_hat, b_n):
     """Calculates probability of the P00 state which is the product of PS=0 PN=0. i.e. P_00 = PS=0 * PN=0.
     Under the assumption of independent binding. 
 
@@ -49,7 +51,7 @@ def p00(a_s, b_s, a_n, b_n):
     Return:
         Probability of finding both PN=0 and PS=0. i.e. the product of PS=0 * PN=0
     """
-    return (b_s / (a_s + b_s)) * (b_n / (a_n + b_n))
+    return (b_s / (a_s_hat + b_s)) * (b_n / (a_n_hat + b_n))
 
 
 def p01(a_s, b_s, a_n, b_n):

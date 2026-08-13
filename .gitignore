@@ -66,7 +66,7 @@ dmypy.json
 
 # Raw data is downloaded, never committed (see scripts/download_data.py)
 /data/raw/
-/data/*.csv
+/data/*.npy
 
 # Inference traces and simulation outputs are regenerated
 /results/
@@ -77,15 +77,4 @@ dmypy.json
 /.archive/
 /output/
 *.log
-
-# Editor-local Claude settings
-/.claude/
-
-# Orphaned diagnostic plot dumps with no generating script in the repo. Kept
-# on disk but untracked; regenerate from notebooks/05_abc_diagnostics.ipynb or
-# delete. See the PR discussion.
-/bmb_chp02_plots/
-/exploratory_plots/
-/ppc_plots/
-
-# figures/output/ IS tracked: it holds the publication figures.
+*.txt
