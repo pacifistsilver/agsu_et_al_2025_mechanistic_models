@@ -179,10 +179,6 @@ def make_figure(build, xvals, yvals, xlab, ylab, xref, yref,
     C_M, C_HD = "#c0562b", "#1f5f8b"
     fig, ax = plt.subplots(3, 3, figsize=(11.0, 9.4))
 
-    def tag(a, t):
-        a.text(-0.20, 1.10, t, transform=a.transAxes, fontsize=11,
-               fontweight="bold", va="top")
-
     def heat(a, Z, title, cmap, norm, cb_label, levels=None, note=True):
         im = a.pcolormesh(X, Y, Z, cmap=cmap, norm=norm,
                           shading="auto", rasterized=True)
@@ -194,7 +190,6 @@ def make_figure(build, xvals, yvals, xlab, ylab, xref, yref,
         a.axvline(xref, color="w", lw=.5, ls=":", alpha=.5)
         a.axhline(yref, color="w", lw=.5, ls=":", alpha=.5)
         a.set_xlabel(xlab); a.set_ylabel(ylab)
-        a.set_title(title, fontsize=8.5, pad=4)
         if note:
             a.text(0.97, 0.04, fixed_note, transform=a.transAxes,
                    ha="right", va="bottom", fontsize=5.8, color="w",
@@ -214,7 +209,6 @@ def make_figure(build, xvals, yvals, xlab, ylab, xref, yref,
         a.set_yscale("log"); a.set_ylim(1e-5, 1.0)
         a.set_xlim(0, min(Ph.size-1, 110))
         a.set_xlabel("mRNA count $y$"); a.set_ylabel("$P(y)$")
-        a.set_title(dist_title % v, fontsize=8.5, pad=4)
         mM, FM, _ = stats(Pm); mH, FH, _ = stats(Ph)
         a.text(.40, .95,
                f"{LBL_M:<4} <y>={mM:5.1f}  F={FM:5.2f}\n"
@@ -223,7 +217,6 @@ def make_figure(build, xvals, yvals, xlab, ylab, xref, yref,
                transform=a.transAxes, fontsize=6.2, va="top",
                family="monospace")
         a.legend(fontsize=7, loc="lower left")
-        tag(a, "abc"[k])
 
     # ---- row 2: Fano
     flo = min(F_hd.min(), F_m.min()); fhi = max(F_hd.max(), F_m.max())
@@ -236,8 +229,6 @@ def make_figure(build, xvals, yvals, xlab, ylab, xref, yref,
     heat(ax[1, 2], R, rf"$\log_2 (F_{{\rm HD}}/F_{{\rm {LBL_M}}})$", "RdBu_r",
          TwoSlopeNorm(vcenter=0.0, vmin=-rmax, vmax=rmax),
          r"$\log_2$ ratio", levels=[-1, 0, 1])
-    for k in range(3):
-        tag(ax[1, k], "def"[k])
 
     # ---- row 3: CV^2 and distinguishability
     clo = min(CV2_hd.min(), CV2_m.min()); chi = max(CV2_hd.max(), CV2_m.max())
@@ -248,14 +239,11 @@ def make_figure(build, xvals, yvals, xlab, ylab, xref, yref,
     heat(ax[2, 2], TV,
          rf"total variation $d_{{\rm TV}}(P_{{\rm HD}}, P_{{\rm {LBL_M}}})$",
          "RdBu_r", None, r"$d_{\rm TV}$", levels=[0.02, 0.05, 0.1, 0.25])
-    for k in range(3):
-        tag(ax[2, k], "ghi"[k])
 
     fig.tight_layout(w_pad=2.2, h_pad=2.6)
     os.makedirs("./figures/output", exist_ok=True)
     out = f"./figures/output/{outname}"
     fig.savefig(out + ".svg", bbox_inches="tight", facecolor="w")
-    fig.savefig(out + ".png", bbox_inches="tight", facecolor="w")
     plt.close(fig)
 
     frac = lambda t: float(np.mean(TV < t))
@@ -271,8 +259,8 @@ def make_figure(build, xvals, yvals, xlab, ylab, xref, yref,
 al = np.logspace(-2.5,2.5, NGRID)
 fx_a = rf"$\beta_s={BS0:g}$, $\beta_n={BN0:g}$"
 make_figure(lambda x, y: (x, BS0, y, BN0), al, al,
-            rf"$k_{{on,s}}$ {RATE}", rf"$k_{{on,s}}$ {RATE}", BS0, BN0, fx_a,
-            [0.01, 0.1, 1.0], r"$\alpha_s=\alpha_n=%g$ s$^{-1}$",
+            rf"$k_{{on,s}}$ {RATE}", rf"$k_{{on,n}}$ {RATE}", BS0, BN0, fx_a,
+            [0.01, 0.1, 1.0], "",
             "fig_4_noise_alpha")
 
 
