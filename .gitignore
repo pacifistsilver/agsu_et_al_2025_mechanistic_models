@@ -78,3 +78,5 @@ dmypy.json
 /output/
 *.log
 *.txt
+*.png
+*.svg
