@@ -1,16 +1,16 @@
-"""Fit a promoter model to allele-resolved counts by SMC over the exact posterior.
+"""Fit a promoter model to allele-resolved counts by ABC-SMC.
 
-This was ABC-SMC against a Gillespie simulator compared through a two-number
-summary statistic. It now uses the exact stationary likelihood from
-:mod:`stochtf.inference.likelihood`, so the whole distribution is scored and
-there is no ABC tolerance to tune.
+The two competing topologies are ``heterodimer`` (two independent sites, mRNA
+whenever either is bound) and ``monomer`` (one site SOX2 and NANOG compete for,
+S <- 0 -> N). Both are simulated at stationarity and compared to the data
+through a Wasserstein discrepancy; see stochtf.inference.models.
 
 Rates are inferred in units of the mRNA degradation rate gamma, which
-stationary counts cannot identify separately; see stochtf.inference.models.
+stationary counts cannot identify separately.
 
 Usage
 -----
-    python scripts/run_inference.py --gene esrrb --model dimer
+    python scripts/run_inference.py --gene esrrb --model heterodimer
     python scripts/run_inference.py --gene sox2 --model monomer --draws 200
 
 Traces are written to ``results/<gene>_<model>.nc`` and are the input to
@@ -29,12 +29,11 @@ GENES = ["sox2", "nanog", "rex1", "esrrb", "synthetic_heterodimer_data",
 
 
 def load_counts(gene):
-    """Load the processed per-cell count vector for one gene."""
+    """Per-cell counts for one gene: real ones live under data/processed,
+    the ``synthetic_*`` ones under data/synthetic."""
+    if gene.startswith("synthetic_"):
+        return np.load(paths.synthetic(f"{gene}.npy"))
     return np.load(paths.processed(f"{gene}.npy"))
-
-def load_synthetic(gene):
-    """Load the processed per-cell count vector for one gene."""
-    return np.load(paths.synthetic(f"{gene}.npy"))
 
 
 def main():
@@ -42,15 +41,15 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--gene", choices=GENES, default="esrrb",
                     help="gene whose counts to fit (default: esrrb)")
-    ap.add_argument("--model", choices=sorted(MODELS), default="dimer",
-                    help="promoter model to fit (default: dimer)")
+    ap.add_argument("--model", choices=sorted(MODELS), default="heterodimer",
+                    help="promoter model to fit (default: heterodimer)")
     ap.add_argument("--draws", type=int, default=None,
                     help="SMC draws; defaults to the model's sampler config")
     ap.add_argument("--out", default=None,
                     help="output .nc path (default: results/<gene>_<model>.nc)")
     args = ap.parse_args()
 
-    data = load_synthetic(args.gene)
+    data = load_counts(args.gene)
     print(f"Fitting {args.model} model to {args.gene}: {data.shape} observations "
           f"(mean {data.mean():.1f}, Fano {data.var() / data.mean():.1f})")
 

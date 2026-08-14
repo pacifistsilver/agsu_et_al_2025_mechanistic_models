@@ -40,9 +40,9 @@ from stochtf.ssa.fast import fast_ssa_dimer, fast_ssa_monomer
 #: "per mRNA lifetime"). Slow switching and a large k_y put this in the bursty
 #: regime, where the promoter state leaves a visible signature in the counts.
 TRUE_PARAMS = {
-    "alpha_s": 1.0,
+    "alpha_s": 0.01,
     "beta_s": 0.06,
-    "alpha_n": 0.15,
+    "alpha_n": 1.0,
     "beta_n": 0.24,
     "gamma_y": 1.0,
     "k_y": 20.0,
