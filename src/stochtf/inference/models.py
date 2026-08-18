@@ -1,9 +1,26 @@
-"""ABC-SMC models for the monomer and heterodimer promoters.
+"""Bayesian models for the monomer and heterodimer promoters.
 
-Inference is likelihood-free: parameters are scored by simulating counts and
-comparing them to the data through a discrepancy, using ``pm.Simulator`` inside
-``pm.sample_smc`` -- which is exactly ABC-SMC (sequential Monte Carlo over an
-annealed sequence of ABC posteriors, with an independent Metropolis kernel).
+Both are sampled with ``pm.sample_smc``. They differ in how a proposal is
+scored, selected by ``model_config["method"]``:
+
+``exact`` (default)
+    The stationary distribution P(y | theta) is computed numerically by finite
+    state projection (:mod:`stochtf.cme.stationary`) and the counts are scored
+    against the whole of it. There is no tolerance to tune and no simulation
+    noise, so the sampler targets the true posterior.
+
+``abc``
+    The likelihood-free route: counts are simulated and compared to the data
+    through a discrepancy, using ``pm.Simulator``, which with ``sample_smc``
+    is ABC-SMC. Kept because it needs only a forward simulator, so it still
+    applies to variants the projection cannot reach -- and because agreement
+    between the two is a good check on both.
+
+Projection replaced simulation as the default because it is both exact and,
+at these state-space sizes, no more expensive: the promoter has three or four
+states and the count grid is a few hundred wide, so one solve costs a few
+milliseconds -- about what simulating a dataset costs, but without the noise
+that forces epsilon to stay wide.
 
 The two promoters
 -----------------
@@ -25,8 +42,8 @@ differ only in topology, which is the hypothesis under test:
     the ``k_y (n_b + s_b)`` emission of :mod:`stochtf.analytical.monomer` --
     the two terms cannot both be one here.
 
-The simulator
--------------
+The simulator (ABC method only)
+-------------------------------
 Conditional on the promoter path sigma(t), transcription is an inhomogeneous
 Poisson process and each mRNA survives to the observation time with probability
 exp(-gamma * age), so the stationary count is exactly
@@ -78,18 +95,23 @@ otherwise make the marginals ambiguous: with beta_s != beta_n the two sites are
 no longer interchangeable, so alpha_s and alpha_n mean what their names say.
 See :mod:`stochtf.inference.identifiability` for what is and is not determined.
 
-Discrepancy
------------
+Discrepancy (ABC method only)
+-----------------------------
 The default is the sorted count vector under a Gaussian kernel, i.e. the 1D
 2-Wasserstein distance between the empirical distributions. It uses the whole
 distribution rather than the two-number ``[mean, fano]`` summary the old
 version accepted on, so far less information is thrown away. ``epsilon`` is a
 tolerance in molecules and defaults to a quarter of the observed standard
 deviation, which scales across genes; the old hard-coded ``epsilon = 2.0`` did
-not. The ABC posterior is still broader than the true posterior by an amount
-set by epsilon and by simulator noise; that is the price of being
-likelihood-free, and :mod:`stochtf.inference.likelihood` is kept as the exact
-reference to check it against.
+not. The ABC posterior remains broader than the true posterior by an amount set
+by epsilon and by simulator noise -- which is the reason the exact method is
+the default.
+
+Note that :mod:`stochtf.inference.likelihood` computes the same quantity for
+the *independent-site* gates via ``stochtf.analytical.pgf``. That route cannot
+express the exclusive monomer, whose promoter is not a product of two
+two-state sites, which is why :func:`log_likelihood` here goes through the
+projection instead.
 """
 
 import json
@@ -100,6 +122,12 @@ import pymc as pm
 import pytensor.tensor as pt
 from numba import njit
 from pymc_extras.model_builder import ModelBuilder
+from pytensor.graph.basic import Apply
+from pytensor.graph.op import Op
+
+from stochtf import constants
+from stochtf.cme import stationary as cme_stationary
+from stochtf.inference.likelihood import MIN_PROB, prepare_counts
 
 #: Time unit: rates are expressed relative to the mRNA degradation rate, which
 #: stationary count data cannot identify separately.
@@ -131,8 +159,8 @@ MIN_EPSILON = 1e-3
 #: the on-rates and k_y to be estimated from a problem the data can support.
 #: Set either to None in ``model_config`` to infer it with its log-normal prior
 #: instead.
-FIXED_BETA_S = 0.04
-FIXED_BETA_N = 0.26
+FIXED_BETA_S = constants.BETA_S
+FIXED_BETA_N = constants.BETA_N
 
 #: Log-normal priors, in units of gamma. Switching rates are centred on 1 (one
 #: event per mRNA lifetime) and spread over four orders of magnitude either
@@ -149,6 +177,10 @@ DEFAULT_MODEL_CONFIG: Dict = {
     # Pinned rates. A value here replaces the prior above with a constant.
     "beta_s_fixed": FIXED_BETA_S,
     "beta_n_fixed": FIXED_BETA_N,
+    # "exact" scores the whole distribution from the finite state projection;
+    # "abc" falls back to simulating counts and comparing them through the
+    # epsilon kernel below. Both are sampled with pm.sample_smc.
+    "method": "exact",
     # ABC kernel. epsilon=None resolves to epsilon_scale * std(observed) at
     # build time and is written back here, so the value used is recorded.
     # sum_stat and distance go straight to pm.Simulator; keep them strings so
@@ -369,16 +401,146 @@ def simulate_heterodimer(rng, alpha_s, alpha_n, beta_s, beta_n, k_y, size=None):
 
 
 # ----------------------------------------------------------------------
+# exact likelihood, by finite state projection
+# ----------------------------------------------------------------------
+
+def chain_generator(promoter, a_s, b_s, a_n, b_n):
+    """Dense promoter generator and activity vector for one topology."""
+    starts, targets, rates, act, _ = PROMOTERS[promoter](a_s, b_s, a_n, b_n)
+    jumps = [(state, int(targets[j]), float(rates[j]))
+             for state in range(act.size)
+             for j in range(starts[state], starts[state + 1])]
+    return cme_stationary.generator_from_jumps(act.size, jumps), act
+
+
+def log_likelihood(counts, alpha_s, alpha_n, beta_s, beta_n, k_y,
+                   promoter="heterodimer", gamma=GAMMA):
+    """Exact log-likelihood of iid stationary counts, by finite state projection.
+
+    Once :mod:`stochtf.cme.stationary` can produce P(y | theta) numerically for
+    either topology, the whole distribution can be scored directly and there is
+    no tolerance to tune and no simulation noise -- the sampler targets the true
+    posterior rather than an ABC approximation to it.
+
+    Returns ``-inf`` for parameters outside the model's support rather than
+    raising, so a sampler can simply reject them.
+    """
+    y = prepare_counts(counts)
+    rates = (alpha_s, alpha_n, beta_s, beta_n, k_y, gamma)
+    if not all(np.isfinite(rates)):
+        return -np.inf
+    if min(alpha_s, alpha_n) < 0 or min(beta_s, beta_n) <= 0 or k_y < 0:
+        return -np.inf
+    if gamma <= 0 or alpha_s + alpha_n <= 0:
+        return -np.inf
+
+    Q, act = chain_generator(promoter, alpha_s, beta_s, alpha_n, beta_n)
+    try:
+        p = cme_stationary.stationary_pmf(Q, act, k_y, gamma)
+    except (FloatingPointError, np.linalg.LinAlgError, ValueError):
+        return -np.inf
+    if not np.all(np.isfinite(p)):
+        return -np.inf
+
+    # The projection is sized from the model's own moments, so an observation
+    # can still fall beyond it; those get the floor rather than -inf.
+    inside = y[y < p.size]
+    total = float(np.sum(np.log(np.maximum(p[inside], MIN_PROB))))
+    total += float(y.size - inside.size) * np.log(MIN_PROB)
+    return total
+
+
+def simulate_joint(rng, model_index, alpha_s, alpha_n, beta_s, beta_n, k_y,
+                   size=None):
+    """Simulate under whichever topology the model index currently selects."""
+    promoter = "heterodimer" if int(np.asarray(model_index).item()) else "monomer"
+    return simulate_counts(rng, alpha_s, alpha_n, beta_s, beta_n, k_y,
+                           promoter=promoter, size=size)
+
+
+class StationaryLogLike(Op):
+    """Gradient-free PyTensor Op wrapping :func:`log_likelihood`.
+
+    The likelihood needs a linear solve per proposal, so there is no tractable
+    gradient. That is fine: ``pm.sample_smc`` uses gradient-free Metropolis
+    kernels within each stage.
+
+    This is a hand-written Op rather than ``pytensor.wrap_py`` because the Op
+    has to survive pickling. ``wrap_py`` reduces by *name lookup*, so an Op
+    built inside a factory closing over the observed counts cannot be
+    unpickled. A normal Op subclass pickles by state instead: the class
+    resolves by reference and ``counts``/``promoter`` travel by value, which
+    matters because ``sample_smc`` runs chains in separate processes.
+
+    No ``__props__`` is declared, so equality falls back to object identity.
+    That is deliberate -- two instances holding different datasets must never
+    compare equal, or PyTensor's graph merging could substitute one for the
+    other.
+    """
+
+    def __init__(self, counts, promoter):
+        self.counts = prepare_counts(counts)
+        self.promoter = promoter
+
+    def make_node(self, alpha_s, alpha_n, beta_s, beta_n, k_y):
+        inputs = [pt.as_tensor_variable(v)
+                  for v in (alpha_s, alpha_n, beta_s, beta_n, k_y)]
+        return Apply(self, inputs, [pt.scalar(dtype="float64")])
+
+    def perform(self, node, inputs, output_storage):
+        alpha_s, alpha_n, beta_s, beta_n, k_y = (float(v) for v in inputs)
+        value = log_likelihood(self.counts, alpha_s, alpha_n, beta_s, beta_n,
+                               k_y, promoter=self.promoter, gamma=GAMMA)
+        output_storage[0][0] = np.asarray(value, dtype="float64")
+
+
+class JointStationaryLogLike(Op):
+    """:class:`StationaryLogLike` with the topology chosen by an extra input.
+
+    Takes the model index first, so one Potential can serve both promoters and
+    SMC can move between them within a single run.
+    """
+
+    #: Index value -> promoter. 0 is the monomer, 1 the heterodimer.
+    PROMOTER_BY_INDEX = ("monomer", "heterodimer")
+
+    def __init__(self, counts):
+        self.counts = prepare_counts(counts)
+
+    def make_node(self, model_index, alpha_s, alpha_n, beta_s, beta_n, k_y):
+        inputs = [pt.as_tensor_variable(v) for v in
+                  (model_index, alpha_s, alpha_n, beta_s, beta_n, k_y)]
+        return Apply(self, inputs, [pt.scalar(dtype="float64")])
+
+    def perform(self, node, inputs, output_storage):
+        index = int(round(float(inputs[0])))
+        index = min(max(index, 0), len(self.PROMOTER_BY_INDEX) - 1)
+        alpha_s, alpha_n, beta_s, beta_n, k_y = (float(v) for v in inputs[1:])
+        value = log_likelihood(self.counts, alpha_s, alpha_n, beta_s, beta_n,
+                               k_y, promoter=self.PROMOTER_BY_INDEX[index],
+                               gamma=GAMMA)
+        output_storage[0][0] = np.asarray(value, dtype="float64")
+
+
+# ----------------------------------------------------------------------
 # models
 # ----------------------------------------------------------------------
 
-class _ABCModel(ModelBuilder):
-    """Shared ABC-SMC plumbing. Subclasses set :attr:`simulator` only."""
+class _PromoterModel(ModelBuilder):
+    """Shared plumbing. Subclasses set :attr:`promoter` and :attr:`simulator`.
 
+    Both fitting methods are sampled by ``pm.sample_smc``; they differ only in
+    how a proposal is scored. ``method="exact"`` evaluates the whole
+    distribution by finite state projection, ``method="abc"`` simulates counts
+    and compares them through the epsilon kernel.
+    """
+
+    #: Key into :data:`PROMOTERS`.
+    promoter = None
     #: Module-level simulator taking (rng, alpha_s, alpha_n, beta_s, beta_n,
-    #: k_y, size).
+    #: k_y, size). Only used by the ABC method.
     simulator = None
-    version = "2.0"
+    version = "3.0"
 
     def _data_setter(self, X, y=None):
         pass  # ModelBuilder requires this method; X/y are not standard inputs
@@ -395,7 +557,7 @@ class _ABCModel(ModelBuilder):
         return dict(DEFAULT_SAMPLER_CONFIG)
 
     def _prepare(self, y):
-        """Flatten the counts and resolve epsilon against them."""
+        """Flatten the counts and, for ABC only, resolve epsilon against them."""
         if y is None:
             raise ValueError("observed counts are required to build the model")
         counts = np.asarray(y, dtype="float64").ravel()
@@ -403,6 +565,11 @@ class _ABCModel(ModelBuilder):
             raise ValueError("observed counts are empty")
 
         cfg = self.model_config
+        if cfg.get("method", "exact") != "abc":
+            # Leave epsilon unresolved: recording a tolerance that nothing read
+            # would misrepresent the fit in the saved trace.
+            return counts, None
+
         epsilon = cfg.get("epsilon")
         if epsilon is None:
             scale = cfg.get("epsilon_scale", EPSILON_SCALE)
@@ -434,19 +601,26 @@ class _ABCModel(ModelBuilder):
             beta_n = self._rate("beta_n")
             k_y = self._rate("k_y")
 
-            pm.Simulator(
-                "counts",
-                self.simulator,
-                params=(alpha_s, alpha_n, beta_s, beta_n, k_y),
-                sum_stat=cfg.get("sum_stat", "sort"),
-                distance=cfg.get("distance", "gaussian"),
-                epsilon=epsilon,
-                observed=counts,
-            )
+            if cfg.get("method", "exact") == "exact":
+                logp = StationaryLogLike(counts, self.promoter)
+                # Grouped with the data log-probability, so SMC tempers it.
+                pm.Potential("likelihood",
+                             logp(alpha_s, alpha_n, beta_s, beta_n, k_y))
+            else:
+                pm.Simulator(
+                    "counts",
+                    self.simulator,
+                    params=(alpha_s, alpha_n, beta_s, beta_n, k_y),
+                    sum_stat=cfg.get("sum_stat", "sort"),
+                    distance=cfg.get("distance", "gaussian"),
+                    epsilon=epsilon,
+                    observed=counts,
+                )
 
         return self.model
 
-    def fit(self, data, sampler_config: dict = None, **kwargs):
+    def fit(self, data, sampler_config: dict = None, sample_prior: bool = True,
+            **kwargs):
         """Fit by ABC-SMC.
 
         ``pm.sample_smc`` on a model whose only observed node is a
@@ -469,14 +643,18 @@ class _ABCModel(ModelBuilder):
                 chains=sampler_config.get("chains", 8),
                 **kwargs,
             )
-            # Worth keeping here: the prior predictive shows whether the priors
-            # can generate data resembling the observations at all, which is
-            # the first thing to check when ABC will not converge.
-            prior = pm.sample_prior_predictive(draws=500, random_seed=500)
-            if "prior" in prior:
-                self.idata["prior"] = prior["prior"]
-            if "prior_predictive" in prior:
-                self.idata["prior_predictive"] = prior["prior_predictive"]
+            # Worth keeping for a single fit: the prior predictive shows
+            # whether the priors can generate data resembling the observations
+            # at all, which is the first thing to check when a fit will not
+            # converge. Worth skipping when fitting hundreds of datasets in a
+            # sweep, where it is a large fraction of the runtime and nothing
+            # reads it.
+            if sample_prior:
+                prior = pm.sample_prior_predictive(draws=500, random_seed=500)
+                if "prior" in prior:
+                    self.idata["prior"] = prior["prior"]
+                if "prior_predictive" in prior:
+                    self.idata["prior_predictive"] = prior["prior_predictive"]
 
         return self.idata
 
@@ -517,7 +695,7 @@ class _ABCModel(ModelBuilder):
         super().save(fname)
 
 
-class MonomerModel(_ABCModel):
+class MonomerModel(_PromoterModel):
     """SOX2 and NANOG competing for one site, S <- 0 -> N.
 
     Binding is exclusive, so occupancy saturates at one factor and the two
@@ -527,10 +705,11 @@ class MonomerModel(_ABCModel):
     """
 
     model_type = "MonomerModel"
+    promoter = "monomer"
     simulator = staticmethod(simulate_monomer)
 
 
-class HeterodimerModel(_ABCModel):
+class HeterodimerModel(_PromoterModel):
     """Two independent sites; any bound site gives the full transcription rate.
 
     Both sites can be occupied at once, so the promoter is silent only when
@@ -539,7 +718,112 @@ class HeterodimerModel(_ABCModel):
     """
 
     model_type = "HeterodimerModel"
+    promoter = "heterodimer"
     simulator = staticmethod(simulate_heterodimer)
 
 
-MODELS = {"monomer": MonomerModel, "heterodimer": HeterodimerModel}
+#: Prior probability that the heterodimer is the right topology. 0.5 gives the
+#: two equal prior odds, so the posterior on ``model_index`` reads directly as
+#: the weight of evidence.
+DEFAULT_HETERODIMER_PRIOR = 0.5
+
+
+class JointModel(_PromoterModel):
+    """Both topologies fitted at once, with a model index SMC samples over.
+
+    Rather than fitting the two promoters separately and comparing afterwards,
+    the topology becomes a parameter: ``model_index`` is 0 for the monomer and
+    1 for the heterodimer, and every proposal is scored under whichever it
+    currently selects. The posterior mean of that index is P(heterodimer |
+    data), and the posterior odds against the prior odds is the Bayes factor.
+    This is the ABC-SMC model-selection scheme of Toni & Stumpf, and it works
+    here without any trans-dimensional machinery for one specific reason: the
+    two promoters take the *same* five rates, so the parameter space does not
+    change when the index flips and a single set of priors serves both.
+
+    Two things to keep in mind when reading the result.
+
+    The comparison is only as meaningful as its shared footing. Both topologies
+    must see the same data, the same priors and the same scoring method, which
+    is automatic here but would not survive, say, giving one of them a
+    different epsilon.
+
+    And the data may simply not decide. At matched burst frequency and burst
+    size the two put nearly the same law on the counts -- their Fano factors
+    agree to better than 2% everywhere both are reachable (see
+    ``figures/fig_8_fb_sfsp``) -- so a posterior near the prior is the honest
+    answer rather than a failure of the sampler. Check
+    :func:`model_probabilities` against the prior before reading anything into
+    it.
+    """
+
+    model_type = "JointModel"
+    simulator = staticmethod(simulate_joint)
+
+    @staticmethod
+    def get_default_model_config() -> Dict:
+        return {**DEFAULT_MODEL_CONFIG,
+                "heterodimer_prior": DEFAULT_HETERODIMER_PRIOR}
+
+    def build_model(self, X=None, y=None, **kwargs):
+        counts, epsilon = self._prepare(y)
+        cfg = self.model_config
+
+        with pm.Model() as self.model:
+            # 0 = monomer, 1 = heterodimer. Discrete, and sample_smc moves it.
+            model_index = pm.Bernoulli(
+                "model_index",
+                p=cfg.get("heterodimer_prior", DEFAULT_HETERODIMER_PRIOR))
+
+            alpha_s = self._rate("alpha_s")
+            alpha_n = self._rate("alpha_n")
+            beta_s = self._rate("beta_s")
+            beta_n = self._rate("beta_n")
+            k_y = self._rate("k_y")
+
+            if cfg.get("method", "exact") == "exact":
+                logp = JointStationaryLogLike(counts)
+                pm.Potential("likelihood",
+                             logp(model_index, alpha_s, alpha_n, beta_s,
+                                  beta_n, k_y))
+            else:
+                pm.Simulator(
+                    "counts",
+                    self.simulator,
+                    params=(model_index, alpha_s, alpha_n, beta_s, beta_n,
+                            k_y),
+                    sum_stat=cfg.get("sum_stat", "sort"),
+                    distance=cfg.get("distance", "gaussian"),
+                    epsilon=epsilon,
+                    observed=counts,
+                )
+
+        return self.model
+
+
+def model_probabilities(idata, heterodimer_prior=DEFAULT_HETERODIMER_PRIOR):
+    """Posterior topology probabilities and the Bayes factor, from a joint fit.
+
+    The Bayes factor divides out the prior odds, so it measures what the data
+    contributed rather than what was assumed. A value near 1 means the counts
+    did not separate the two topologies.
+    """
+    index = np.asarray(idata["posterior"]["model_index"]).ravel()
+    p_het = float(index.mean())
+    p_mono = 1.0 - p_het
+
+    prior_odds = heterodimer_prior / (1.0 - heterodimer_prior)
+    if p_mono == 0.0:
+        bayes_factor = np.inf
+    elif p_het == 0.0:
+        bayes_factor = 0.0
+    else:
+        bayes_factor = (p_het / p_mono) / prior_odds
+
+    return {"monomer": p_mono, "heterodimer": p_het,
+            "bayes_factor_het_over_mono": bayes_factor,
+            "n_draws": index.size}
+
+
+MODELS = {"monomer": MonomerModel, "heterodimer": HeterodimerModel,
+          "joint": JointModel}

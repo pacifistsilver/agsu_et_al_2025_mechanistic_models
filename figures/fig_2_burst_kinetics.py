@@ -32,43 +32,50 @@ use_paper_style(sans_serif="Arial")
 C = PALETTE
 
 C_M, C_HD = C[0], C[1]
-fig, ax = plt.subplots(2, 3, figsize=(11, 7.2))
-gs = fig.add_gridspec(2, 3, hspace=0.42, wspace=0.52)
+fig, ax = plt.subplots(2, 2, figsize=(8.4, 7.2))
+fig.subplots_adjust(hspace=0.42, wspace=0.52)
+
+
+def add_burst_size_axis(a, ky):
+    """Read burst size off the tau_on axis.
+
+    Both models define b = k_y * tau_on exactly, so the two quantities are one
+    curve under two units: a second axis scaled by k_y shows both without
+    drawing every line twice.
+    """
+    secondary = a.secondary_yaxis("right", functions=(lambda t: ky * t,
+                                                      lambda b: b / ky))
+    secondary.set_ylabel("Burst size")
+    return secondary
+
 
 betas = np.logspace(-3, 0, 400)
 M = np.array([M_kin(AS, b, AN, b, k_y) for b in betas]).T     # tau_on, tau_off, f, b
 hd  = np.array([hd_kin(AS, b, AN, b, k_y) for b in betas]).T
 
-# ---- (a) tau_on vs alpha
+# ---- (a) tau_on and burst size vs k_off
 a = ax[0, 0]
 a.loglog(betas, M[0], color=C_M, lw=1.8, label="M (3-state)")
 a.loglog(betas, hd[0],  color=C_HD,  lw=1.8, label="HD (4-state)")
 a.set_xlabel(r"$k_{off}$ (s$^{-1}$)"); a.set_ylabel(r"$\tau_{\rm on}$ (s)")
-ax[0, 0].loglog(betas, 1/betas, color="#999", lw=.9, ls="--", zorder=1)
-ax[0, 0].text(2e-3, 1.2e2, r"$1/k_{off}$", fontsize=8, color="#777")
-ax[0, 0].legend(fontsize=8, loc="upper right")
-a.legend(fontsize=7)
+a.loglog(betas, 1/betas, color="#999", lw=.9, ls="--", zorder=1)
+a.text(2e-3, 1.2e2, r"$1/k_{off}$", fontsize=8, color="#777")
+a.legend(fontsize=7, loc="upper right")
+add_burst_size_axis(a, k_y)
 
-# ---- (b) burst frequency vs alpha
+# ---- (b) burst frequency vs k_off
 a = ax[0, 1]
 a.loglog(betas, M[2]/gamma, color=C_M, lw=1.8, label="M")
 a.loglog(betas, hd[2]/gamma,  color=C_HD,  lw=1.8, label="HD")
 
 a.set_xlabel(r"$k_{off}$ (s$^{-1}$)"); a.set_ylabel(r"Burst Frequency ($\gamma^{-1}$)")
 
-# ---- (c) burst size vs alpha
-a = ax[0, 2]
-a.loglog(betas, M[3], color=C_M, lw=1.8, label="M")
-a.loglog(betas, hd[3],  color=C_HD,  lw=1.8, label="HD")
-a.set_xlabel(r"$k_{off}$ (s$^{-1}$)"); a.set_ylabel("Burst Size")
-a.set_ylim(0)
-
 # alphas
 al = np.logspace(-3, 3, 300)
 M = np.array([M_kin(a, BS, a, BN, k_y) for a in al]).T     # tau_on, tau_off, f, b
 hd  = np.array([hd_kin(a, BS, a, BN, k_y) for a in al]).T
 
-# ---- (a) tau_on vs alpha
+# ---- (a) tau_on and burst size vs k_on
 a = ax[1, 0]
 for lvl, lab in [(1/BS, r"$1/\beta_s$"), (1/BN, r"$1/\beta_n$")]:
     a.axhline(lvl, color="#999", lw=.8, ls=":")
@@ -77,8 +84,9 @@ for lvl, lab in [(1/BS, r"$1/\beta_s$"), (1/BN, r"$1/\beta_n$")]:
 
 a.loglog(al, M[0], color=C_M, lw=1.8, label="M (3-state)")
 a.loglog(al, hd[0],  color=C_HD,  lw=1.8, label="HD (4-state)")
-a.set_xlabel(r"$k_{on}$ (s$^{-1}$)"); a.set_ylabel(r"$\tau_{\rm on}$ (s)")
+a.set_xlabel(r"$k_{on}$ (M$^{-1}$s$^{-1}$)"); a.set_ylabel(r"$\tau_{\rm on}$ (s)")
 a.legend(fontsize=7)
+add_burst_size_axis(a, k_y)
 
 # ---- (b) burst frequency vs alpha
 a = ax[1, 1]
@@ -96,14 +104,8 @@ ax[1, 1].text(0.03, 0.23, "o : $\\alpha^*=\\sqrt{\\beta_s\\beta_n}$\n",
               transform=ax[1, 1].transAxes, fontsize=7, va="top")
 
 
-a.set_xlabel(r"$k_{on}$ (s$^{-1}$)"); a.set_ylabel(r"Burst Frequency ($\gamma^{-1}$)")
+a.set_xlabel(r"$k_{on}$ (M$^{-1}$s$^{-1}$)"); a.set_ylabel(r"Burst Frequency ($\gamma^{-1}$)")
 
-# ---- (c) burst size vs alpha
-a = ax[1, 2]
-a.loglog(al, M[3], color=C_M, lw=1.8, label="M")
-a.loglog(al, hd[3],  color=C_HD,  lw=1.8, label="HD")
-a.set_xlabel(r"$k_{on}$ (s$^{-1}$)"); a.set_ylabel("Burst Size")
-
-
-fig.savefig("./figures/output/fig_2_burst.svg", bbox_inches="tight")
+fig.savefig(output_path("fig_2_burst.svg"), bbox_inches="tight")
+fig.savefig(output_path("fig_2_burst.png"), bbox_inches="tight")
 

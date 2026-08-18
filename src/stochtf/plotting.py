@@ -28,7 +28,7 @@ _PAPER_STYLE = {
     "figure.dpi": 130,
     "savefig.dpi": 160,
     "legend.frameon": False,
-    "axes.grid": True,
+    "axes.grid": False,
     "grid.alpha": 0.25,
     "grid.linewidth": 0.5,
 }

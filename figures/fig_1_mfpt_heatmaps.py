@@ -11,8 +11,8 @@ import stochtf.analytical.monomer as m
 
 use_paper_style(sans_serif="Arial")
 
-BS, BN = 0.05, 0.20          # fixed unbinding rates
-AS0, AN0 = 0.1, 0.1      # reference binding rates
+BS, BN = 0.06, 0.24         # fixed unbinding rates
+AS0, AN0 = 0.5, 0.2      # reference binding rates
 
 SHOW_FIXED = True            # annotate the parameters held constant in each panel
 SHOW_FLAT = True             # annotate axes along which tau_ON is exactly constant
@@ -25,7 +25,7 @@ X1, Y1 = np.meshgrid(alphas, betas)     # (alpha_s, beta_s)
 X2, Y2 = np.meshgrid(alphas, alphas)    # (alpha_s, alpha_n)
 X3, Y3 = np.meshgrid(betas, betas)      # (beta_s,  beta_n)
 
-RATE = r"(s$^{-1}$)"
+RATE = r"(M$^{-1}$s$^{-1}$)"
 fx = lambda **kw: ", ".join(rf"${k}={v:g}$" for k, v in kw.items())
 
 
@@ -44,8 +44,8 @@ def panel(ax, Z, X, Y, xsym, ysym, mark, fixed, lo, hi, levels, tag):
                 fontsize=7.5, color="w")
     else:
         cs = ax.contour(X, Y, Z, levels=levels, colors="w",
-                        linewidths=0.5, alpha=0.6)
-        ax.clabel(cs, inline=True, inline_spacing=8, fontsize=6, fmt="%g")
+                        linewidths=1.5, alpha=0.6)
+        ax.clabel(cs, inline=False, inline_spacing=1, fontsize=8, fmt="%g")
 
     # flag the axes along which tau_ON does not vary -- this is the signature
     # that separates the two models, so say it rather than leave it to the eye
@@ -59,11 +59,6 @@ def panel(ax, Z, X, Y, xsym, ysym, mark, fixed, lo, hi, levels, tag):
             ax.text(0.5, 0.95, "; ".join(notes), transform=ax.transAxes,
                     ha="center", va="top", fontsize=6.5, color="w")
 
-    if SHOW_FIXED and fixed:
-        ax.text(0.97, 0.03, fixed, transform=ax.transAxes,
-                ha="right", va="bottom", fontsize=6, color="w",
-                bbox=dict(fc="k", ec="none", alpha=0.35, pad=1.6))
-
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlim(X.min(), X.max())
@@ -71,8 +66,17 @@ def panel(ax, Z, X, Y, xsym, ysym, mark, fixed, lo, hi, levels, tag):
     if mark:
         ax.plot(*mark, "*", mfc="yellow", mec="black", mew=0.9, ms=11,
                 clip_on=False, zorder=10)
-    ax.set_xlabel(rf"${xsym}$ {RATE}")
-    ax.set_ylabel(rf"${ysym}$ {RATE}")
+    # 1. Handle the X-axis label independently
+    if xsym in ["k_{on,s}", "k_{on,n}"]:
+        ax.set_xlabel(rf"${xsym}$" + r" (M$^{-1}$s$^{-1}$)")
+    elif xsym in ["k_{off,s}", "k_{off,n}"]:
+        ax.set_xlabel(rf"${xsym}$" + r" (s$^{-1}$)")
+
+    # 2. Handle the Y-axis label independently
+    if ysym in ["k_{on,s}", "k_{on,n}"]:
+        ax.set_ylabel(rf"${ysym}$" + r" (M$^{-1}$s$^{-1}$)")
+    elif ysym in ["k_{off,s}", "k_{off,n}"]:
+        ax.set_ylabel(rf"${ysym}$" + r" (s$^{-1}$)")    
     return pcm
 
 
@@ -80,33 +84,31 @@ panels = [
     # HD
     (field(h.t_on(X1, Y1, AN0, BN), X1.shape), X1, Y1,
      r"k_{on,s}", r"k_{off,s}", (),
-     fx(**{r"k_{off,n}": AN0, r"k_{off,s}": BN})),
+     fx(**{r"k_{on,n}": AN0, r"k_{off,n}": BN})),
     (field(h.t_on(X2, BS, Y2, BN), X2.shape), X2, Y2,
      r"k_{on,s}", r"k_{on,n}", (),
      fx(**{r"k_{off,s}": BS, r"k_{on,n}": BN})),
     (field(h.t_on(AS0, X3, AN0, Y3), X3.shape), X3, Y3,
      r"k_{off,s}", r"k_{off,n}", (BS, BN),
-     fx(**{r"k_{off,s}": AS0, r"k_{off,n}": AN0})),
+     fx(**{r"k_{on,s}": AS0, r"k_{on,n}": AN0})),
     # SEQ
     (field(m.t_on(X1, Y1, AN0, BN), X1.shape), X1, Y1,
      r"k_{on,s}", r"k_{off,s}", (),
-     fx(**{r"k_{off,n}": AN0, r"k_{off,s}": BN})),
+     fx(**{r"k_{on,n}": AN0, r"k_{off,n}": BN})),
     (field(m.t_on(X2, BS, Y2, BN), X2.shape), X2, Y2,
      r"k_{on,s}", r"k_{on,n}", (),
-     fx(**{r"k_{off,s}": BS, r"k_{on,n}": BN})),
+     fx(**{r"k_{off,s}": BS, r"k_{off,n}": BN})),
     (field(m.t_on(AS0, X3, AN0, Y3), X3.shape), X3, Y3,
      r"k_{off,s}", r"k_{off,n}", (BS, BN),
-     fx(**{r"k_{off,s}": AS0, r"k_{off,n}": AN0})),
+     fx(**{r"k_{on,s}": AS0, r"k_{on,n}": AN0})),
 ]
-
-print(m.t_on(X1, Y1, AN0, BN))
 
 # one colour scale for every panel, snapped to whole decades so the
 # colourbar ticks and the contour levels line up
 LO = 10.0 ** np.floor(np.log10(min(float(p[0].min()) for p in panels)))
 HI = 10.0 ** np.ceil(np.log10(max(float(p[0].max()) for p in panels)))
-LEVELS =  4 ** np.arange(np.log10(LO), np.log10(HI) + 1)
-
+LEVELS =  5 ** np.arange(np.log10(LO), np.log10(HI) + 5)
+LEVELS = [5, 15, 25, 30, 100, 200, 500]
 fig, axes = plt.subplots(2, 3, figsize=(11.5, 6.6),
                          constrained_layout=True)
 

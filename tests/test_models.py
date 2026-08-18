@@ -15,21 +15,35 @@ pytest.importorskip("pymc_extras")
 
 import cloudpickle  # noqa: E402
 import pymc as pm  # noqa: E402
+import pytensor  # noqa: E402
+import pytensor.tensor as pt  # noqa: E402
 
+from stochtf.cme import stationary as cme_stationary  # noqa: E402
 from stochtf.inference.models import (  # noqa: E402
     FIXED_BETA_N,
     FIXED_BETA_S,
     GAMMA,
     MODELS,
     PROMOTERS,
+    JointStationaryLogLike,
+    StationaryLogLike,
+    chain_generator,
     heterodimer_chain,
+    log_likelihood,
+    model_probabilities,
     monomer_chain,
     simulate_counts,
+    simulate_joint,
 )
 
 #: alpha_s, beta_s, alpha_n, beta_n, k_y -- bursty, like the observed counts.
 RATES = (1.0, 0.06, 0.15, 0.24, 20.0)
 COUNTS = np.array([0, 1, 5, 30, 42, 17])
+
+#: Models with one fixed topology. "joint" carries an extra
+#: model_index RV and a shifted parameter order, so tests that
+#: assume a single promoter use this list instead.
+SINGLE_MODELS = ["heterodimer", "monomer"]
 
 
 def exact_mean(promoter, a_s, b_s, a_n, b_n, k_y):
@@ -185,7 +199,7 @@ def test_simulator_pickles(promoter):
 # PyMC models
 # ----------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", sorted(MODELS))
+@pytest.mark.parametrize("name", SINGLE_MODELS)
 def test_off_rates_are_pinned_by_default(name):
     """Only the on-rates and k_y are free; the betas are constants."""
     built = MODELS[name]().build_model(y=COUNTS)
@@ -193,10 +207,11 @@ def test_off_rates_are_pinned_by_default(name):
     assert free == {"alpha_s", "alpha_n", "k_y"}
 
 
-@pytest.mark.parametrize("name", sorted(MODELS))
+@pytest.mark.parametrize("name", SINGLE_MODELS)
 def test_pinned_values_reach_the_simulator(name):
     """A pinned rate must be the stated number, not merely absent from the trace."""
-    built = MODELS[name]().build_model(y=COUNTS)
+    cfg = {**MODELS[name].get_default_model_config(), "method": "abc"}
+    built = MODELS[name](model_config=cfg).build_model(y=COUNTS)
     (observed,) = built.observed_RVs
     # Simulator params follow the order (alpha_s, alpha_n, beta_s, beta_n, k_y).
     params = observed.owner.op.dist_params(observed.owner)
@@ -207,7 +222,26 @@ def test_pinned_values_reach_the_simulator(name):
     assert (FIXED_BETA_S, FIXED_BETA_N) == (0.04, 0.26)
 
 
-@pytest.mark.parametrize("name", sorted(MODELS))
+@pytest.mark.parametrize("name", SINGLE_MODELS)
+def test_pinned_values_reach_the_exact_likelihood(name):
+    """The model's own score must equal the likelihood at the pinned betas.
+
+    Stronger than reading the constants back out of the graph: it pins down
+    what the sampler is actually being handed.
+    """
+    built = MODELS[name]().build_model(y=COUNTS)
+    point = built.initial_point()
+    alpha_s = float(np.exp(point["alpha_s_log__"]))
+    alpha_n = float(np.exp(point["alpha_n_log__"]))
+    k_y = float(np.exp(point["k_y_log__"]))
+
+    got = float(built.compile_fn(built.datalogp)(point))
+    expected = log_likelihood(COUNTS, alpha_s, alpha_n, FIXED_BETA_S,
+                              FIXED_BETA_N, k_y, promoter=name)
+    assert got == pytest.approx(expected, rel=1e-12)
+
+
+@pytest.mark.parametrize("name", SINGLE_MODELS)
 def test_clearing_the_pin_restores_the_prior(name):
     """The pinning has to be reversible, or the four-rate model is unreachable."""
     cfg = {**MODELS[name].get_default_model_config(),
@@ -217,20 +251,41 @@ def test_clearing_the_pin_restores_the_prior(name):
     assert free == {"alpha_s", "alpha_n", "beta_s", "beta_n", "k_y"}
 
 
+def abc_config(name, **overrides):
+    return {**MODELS[name].get_default_model_config(), "method": "abc",
+            **overrides}
+
+
 @pytest.mark.parametrize("name", sorted(MODELS))
-def test_observed_node_is_a_simulator(name):
+def test_exact_is_the_default_method(name):
+    """Scoring the projected distribution beats an epsilon ball, so it leads."""
+    assert MODELS[name].get_default_model_config()["method"] == "exact"
+
+
+@pytest.mark.parametrize("name", sorted(MODELS))
+def test_abc_method_puts_a_simulator_in_the_graph(name):
     """No Simulator, no ABC: sample_smc would fall back to a real likelihood."""
-    built = MODELS[name]().build_model(y=COUNTS)
+    built = MODELS[name](model_config=abc_config(name)).build_model(y=COUNTS)
     (observed,) = built.observed_RVs
     assert isinstance(observed.owner.op, pm.distributions.simulator.SimulatorRV)
     assert built.rvs_to_values[observed].eval().shape == COUNTS.shape
 
 
 @pytest.mark.parametrize("name", sorted(MODELS))
-def test_abc_logp_is_finite_and_varies_with_the_parameters(name):
-    """The discrepancy has to actually discriminate between proposals."""
-    model = MODELS[name]()
-    built = model.build_model(y=np.repeat(COUNTS, 8))
+def test_exact_method_scores_through_a_potential(name):
+    """SMC tempers model.datalogp, so the term must land there, not in the prior."""
+    built = MODELS[name]().build_model(y=COUNTS)
+    assert not built.observed_RVs
+    data_logp = float(built.compile_fn(built.datalogp)(built.initial_point()))
+    assert np.isfinite(data_logp) and data_logp != 0.0
+
+
+@pytest.mark.parametrize("method", ["exact", "abc"])
+@pytest.mark.parametrize("name", sorted(MODELS))
+def test_logp_is_finite_and_varies_with_the_parameters(name, method):
+    """Either way the score has to actually discriminate between proposals."""
+    cfg = abc_config(name) if method == "abc" else None
+    built = MODELS[name](model_config=cfg).build_model(y=np.repeat(COUNTS, 8))
     logp = built.compile_logp()
 
     point = built.initial_point()
@@ -243,7 +298,7 @@ def test_abc_logp_is_finite_and_varies_with_the_parameters(name):
 @pytest.mark.parametrize("name", sorted(MODELS))
 def test_epsilon_is_resolved_from_the_data_and_recorded(name):
     """A tolerance in molecules, scaled to the gene rather than hard-coded."""
-    model = MODELS[name]()
+    model = MODELS[name](model_config=abc_config(name))
     assert model.model_config["epsilon"] is None
 
     counts = np.repeat(COUNTS, 4)
@@ -257,13 +312,147 @@ def test_epsilon_is_resolved_from_the_data_and_recorded(name):
 
 
 @pytest.mark.parametrize("name", sorted(MODELS))
+def test_exact_method_leaves_epsilon_unset(name):
+    """Recording a tolerance nothing read would misrepresent the saved fit."""
+    model = MODELS[name]()
+    model.build_model(y=COUNTS)
+    assert model.model_config["epsilon"] is None
+
+
+@pytest.mark.parametrize("name", sorted(MODELS))
 def test_explicit_epsilon_is_respected(name):
-    model = MODELS[name](model_config={**MODELS[name].get_default_model_config(),
-                                       "epsilon": 3.0})
+    model = MODELS[name](model_config=abc_config(name, epsilon=3.0))
     model.build_model(y=COUNTS)
     assert model.model_config["epsilon"] == 3.0
+
+
+# ----------------------------------------------------------------------
+# exact likelihood by finite state projection
+# ----------------------------------------------------------------------
+
+@pytest.mark.parametrize("promoter", sorted(PROMOTERS))
+def test_likelihood_matches_the_projected_distribution(promoter):
+    """The log-likelihood is just the pmf summed over the observations."""
+    a_s, b_s, a_n, b_n, k_y = RATES
+    Q, act = chain_generator(promoter, a_s, b_s, a_n, b_n)
+    p = cme_stationary.stationary_pmf(Q, act, k_y, GAMMA)
+    expected = float(np.sum(np.log(p[COUNTS])))
+    got = log_likelihood(COUNTS, a_s, a_n, b_s, b_n, k_y, promoter=promoter)
+    assert got == pytest.approx(expected, rel=1e-12)
+
+
+@pytest.mark.parametrize("promoter", sorted(PROMOTERS))
+def test_likelihood_peaks_near_the_generating_parameters(promoter):
+    """Perturbing any rate away from the truth must lower the score."""
+    a_s, b_s, a_n, b_n, k_y = RATES
+    rng = np.random.default_rng(1)
+    counts = simulate_counts(rng, a_s, a_n, b_s, b_n, k_y, promoter=promoter,
+                             size=4000)
+    base = log_likelihood(counts, a_s, a_n, b_s, b_n, k_y, promoter=promoter)
+    for index, factor in ((0, 3.0), (1, 3.0), (4, 1.5), (4, 0.6)):
+        rates = [a_s, a_n, b_s, b_n, k_y]
+        rates[index] *= factor
+        assert log_likelihood(counts, *rates, promoter=promoter) < base
+
+
+@pytest.mark.parametrize("promoter", sorted(PROMOTERS))
+@pytest.mark.parametrize("bad", [
+    (1.0, 0.15, 0.0, 0.24, 20.0),     # beta_s = 0: never releases
+    (-1.0, 0.15, 0.06, 0.24, 20.0),   # negative rate
+    (1.0, 0.15, 0.06, 0.24, np.nan),
+])
+def test_likelihood_rejects_out_of_support_parameters(promoter, bad):
+    assert log_likelihood(COUNTS, *bad, promoter=promoter) == -np.inf
+
+
+@pytest.mark.parametrize("promoter", sorted(PROMOTERS))
+def test_logp_op_pickles_with_its_data(promoter):
+    """sample_smc cloudpickles the kernel out to worker processes."""
+    op = StationaryLogLike(COUNTS, promoter)
+    restored = cloudpickle.loads(cloudpickle.dumps(op))
+    assert np.array_equal(restored.counts, op.counts)
+    assert restored.promoter == promoter
+
+
+def test_distinct_datasets_never_compare_equal():
+    """No __props__, so graph merging cannot swap one dataset's Op for another."""
+    assert (StationaryLogLike(COUNTS, "heterodimer")
+            != StationaryLogLike(COUNTS + 1, "heterodimer"))
+    assert (StationaryLogLike(COUNTS, "heterodimer")
+            != StationaryLogLike(COUNTS, "monomer"))
 
 
 def test_build_model_requires_observed_counts():
     with pytest.raises(ValueError, match="observed counts are required"):
         MODELS["heterodimer"]().build_model()
+
+
+# ----------------------------------------------------------------------
+# fitting both topologies at once
+# ----------------------------------------------------------------------
+
+def test_joint_model_adds_a_discrete_topology_index():
+    """The topology becomes a parameter, so SMC can move between the two."""
+    built = MODELS["joint"]().build_model(y=COUNTS)
+    free = {v.name for v in built.free_RVs}
+    assert free == {"model_index", "alpha_s", "alpha_n", "k_y"}
+    index = next(v for v in built.free_RVs if v.name == "model_index")
+    assert index.dtype.startswith("int")
+
+
+@pytest.mark.parametrize("index,promoter", [(0, "monomer"),
+                                            (1, "heterodimer")])
+def test_joint_likelihood_matches_the_selected_topology(index, promoter):
+    """Each index value must score exactly what that single model would.
+
+    Without this the index could be sampled perfectly and still be comparing
+    the wrong pair of distributions.
+    """
+    a_s, b_s, a_n, b_n, k_y = RATES
+    op = JointStationaryLogLike(COUNTS)
+    inputs = [pt.dscalar(n) for n in ("m", "a_s", "a_n", "b_s", "b_n", "k_y")]
+    fn = pytensor.function(inputs, op(*inputs))
+
+    got = float(fn(index, a_s, a_n, b_s, b_n, k_y))
+    expected = log_likelihood(COUNTS, a_s, a_n, b_s, b_n, k_y,
+                              promoter=promoter)
+    assert got == pytest.approx(expected, rel=1e-12)
+
+
+def test_joint_index_prior_is_configurable():
+    """Equal prior odds by default, so the posterior reads as evidence."""
+    assert MODELS["joint"].get_default_model_config()["heterodimer_prior"] == 0.5
+
+    cfg = {**MODELS["joint"].get_default_model_config(),
+           "heterodimer_prior": 0.25}
+    built = MODELS["joint"](model_config=cfg).build_model(y=COUNTS)
+    index = next(v for v in built.free_RVs if v.name == "model_index")
+    assert float(index.owner.inputs[-1].eval()) == pytest.approx(0.25)
+
+
+def test_model_probabilities_divides_out_the_prior():
+    """The Bayes factor must report evidence, not the prior it started from."""
+    class FakePosterior(dict):
+        pass
+
+    idata = {"posterior": {"model_index": np.array([[1, 1, 1, 0]])}}
+    probs = model_probabilities(idata, heterodimer_prior=0.5)
+    assert probs["heterodimer"] == pytest.approx(0.75)
+    assert probs["monomer"] == pytest.approx(0.25)
+    assert probs["bayes_factor_het_over_mono"] == pytest.approx(3.0)
+
+    # Same posterior, but reached from a prior that already favoured it: the
+    # data then contributed less, and the factor has to say so.
+    skewed = model_probabilities(idata, heterodimer_prior=0.75)
+    assert skewed["bayes_factor_het_over_mono"] == pytest.approx(1.0)
+
+
+def test_joint_simulator_dispatches_on_the_index():
+    """The ABC path must switch topology too, not silently use one of them."""
+    a_s, b_s, a_n, b_n, k_y = RATES
+    for index, promoter in ((0, "monomer"), (1, "heterodimer")):
+        joint = simulate_joint(np.random.default_rng(11), index, a_s, a_n,
+                               b_s, b_n, k_y, size=4000)
+        direct = simulate_counts(np.random.default_rng(11), a_s, a_n, b_s,
+                                 b_n, k_y, promoter=promoter, size=4000)
+        assert np.array_equal(joint, direct)

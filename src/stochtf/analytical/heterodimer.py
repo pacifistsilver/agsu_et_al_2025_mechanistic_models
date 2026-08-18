@@ -124,6 +124,7 @@ def tbound(a_s, b_s, a_n, b_n):
     return num / bot
 
 
+
 def t_off(a_s, b_s, a_n, b_n):
     """Mean OFF (silent) duration.  Exactly exponential: 1/(alpha_s+alpha_n)."""
     return 1.0 / (a_s + a_n)
