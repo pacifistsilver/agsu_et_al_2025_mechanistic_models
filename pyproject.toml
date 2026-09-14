@@ -33,7 +33,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Bayesian inference stack. Split out because it is heavy and only
-# scripts/run_abc_smc.py and notebook 05 need it.
+# stochtf.scripts.run_inference and notebook 05 need it.
 inference = [
     "pymc>=5.10",
     "pymc-extras>=0.1",

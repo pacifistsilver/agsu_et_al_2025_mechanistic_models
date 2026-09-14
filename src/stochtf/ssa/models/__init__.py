@@ -1,8 +1,8 @@
-"""Propensity functions and parameter sets for the three promoter models.
+"""Propensities and parameter sets for the three promoter models.
 
-Each module exposes ``propensity_fn(state, params)`` and a ``MODEL`` tuple of
-(params, initial_state, stoichiometry, propensity_fn, promoter_idx, mrna_idx) so
-that ``scripts/run_ssa.py`` can drive any of them uniformly.
+Each module gives a propensity_fn(state, params) and a MODEL tuple of
+(params, initial_state, stoichiometry, propensity_fn, promoter_idx, mrna_idx),
+which is all run_ssa needs to drive any of them the same way.
 """
 
 from stochtf.ssa.models import heterodimer, homodimer, monomer

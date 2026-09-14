@@ -1,17 +1,17 @@
-"""Shared figure style and output location.
+"""Figure style and output location, shared by every figure script.
 
-Every figure script calls :func:`use_paper_style` instead of carrying its own
-copy of the rcParams block, so a change to the paper style is a one-line edit.
+Scripts call use_paper_style() rather than each carrying their own rcParams
+block, so restyling the whole paper is one edit here.
 """
 
 import os
 
 import matplotlib as mpl
 
-#: Categorical palette used throughout the figures.
+# Categorical palette used throughout the figures.
 PALETTE = ["#2a6f97", "#c1440e", "#3d8168", "#8a5cb8", "#b08000"]
 
-#: Per-architecture colours, shared by the logic and architecture figures.
+# One colour per promoter architecture, kept the same across figures.
 ARCH_COLOURS = {
     "OR": "#2a6f97",
     "AND": "#c1440e",
@@ -33,7 +33,7 @@ _PAPER_STYLE = {
     "grid.linewidth": 0.5,
 }
 
-#: Directory the figure scripts write into, overridable for out-of-tree builds.
+# Set STOCHTF_FIGURE_DIR to build somewhere other than figures/output.
 OUTPUT_DIR = os.environ.get(
     "STOCHTF_FIGURE_DIR",
     os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
@@ -42,14 +42,10 @@ OUTPUT_DIR = os.environ.get(
 
 
 def use_paper_style(sans_serif=None):
-    """Apply the shared paper rcParams.
+    """Apply the paper rcParams.
 
-    Parameters
-    ----------
-    sans_serif : str, optional
-        Font family to request. Arial is what the submitted figures used, but it
-        is not present on every machine, so it is opt-in per figure rather than
-        a global default that would emit font-fallback warnings everywhere.
+    sans_serif is opt-in rather than a default: the submitted figures used Arial,
+    but plenty of machines don't have it and matplotlib then warns on every call.
     """
     mpl.rcParams.update(_PAPER_STYLE)
     if sans_serif is not None:
@@ -57,6 +53,6 @@ def use_paper_style(sans_serif=None):
 
 
 def output_path(filename):
-    """Absolute path for a figure output, creating the directory on first use."""
+    """Absolute path for a figure output. Makes the directory on first use."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     return os.path.join(OUTPUT_DIR, filename)

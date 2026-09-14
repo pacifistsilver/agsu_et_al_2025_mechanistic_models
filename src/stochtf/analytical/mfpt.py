@@ -1,10 +1,10 @@
 """Corrected mean ON duration for the heterodimer promoter.
 
-tbound() in heterodimer_kinetics_util weights the MFPT-to-00 by the *stationary*
-occupancy of {10,01,11}.  The burst decomposition needs it weighted by the
-*entry* distribution from 00, which is (a_s, a_n)/(a_s+a_n) onto (10, 01).
-Stationary weighting over-counts state 11 (you can never enter the ON set
-there), so it inflates tau_ON.
+tbound() in heterodimer.py weights the MFPT-to-00 by the *stationary* occupancy
+of {10,01,11}.  The burst decomposition needs the *entry* distribution from 00
+instead, which is (a_s, a_n)/(a_s+a_n) onto (10, 01).  Stationary weighting
+over-counts state 11, which you can never enter the ON set through, so it
+inflates tau_ON.
 
 Renewal-reward pins it down in closed form:
     p_bound = tau_ON / (tau_ON + tau_OFF),   tau_OFF = 1/(a_s + a_n)
@@ -15,7 +15,7 @@ import numpy as np
 
 
 def t_on_correct(a_s, b_s, a_n, b_n):
-    """Mean ON (burst) duration -- entry-weighted MFPT from {10,01} to 00."""
+    """Mean ON (burst) duration: entry-weighted MFPT from {10,01} to 00."""
     p_00 = (b_s / (a_s + b_s)) * (b_n / (a_n + b_n))
     return (1.0 - p_00) / (p_00 * (a_s + a_n))
 

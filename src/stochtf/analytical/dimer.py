@@ -2,8 +2,8 @@
 
 If the promoter/pool subsystem does not depend on y, then y | sigma(.) is Cox:
     Var(y) = <y> + (k^2/gamma) [ s^T diag(pi) (gamma I - Q)^-1 s  -  <s>^2/gamma ]
-This holds even when the driver has BIMOLECULAR reactions (dimerisation), because
-the driver is still a finite Markov chain -- we never need its moments to close.
+This holds even when the driver has BIMOLECULAR reactions (dimerisation): it is
+still a finite Markov chain, so we never need its moments to close.
 """
 import numpy as np
 from scipy.sparse import lil_matrix, csc_matrix, identity
