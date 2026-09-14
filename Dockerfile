@@ -1,30 +1,32 @@
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
     NUMBA_CACHE_DIR=/tmp/numba_cache \
+    PYTENSOR_FLAGS=base_compiledir=/tmp/pytensor \
     MPLBACKEND=Agg
 
-# Create non-root user for HPC environments that don't use Singularity
-# For HPCs using Singularity/Apptainer, the host user automatically overrides this, which is fine.
-RUN useradd -m appuser && \
-    mkdir -p /app /tmp/numba_cache && \
-    chown -R appuser:appuser /app /tmp/numba_cache
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends g++ \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m appuser \
+ && mkdir -p /app /tmp/numba_cache /tmp/pytensor \
+ && chown -R appuser:appuser /app /tmp/numba_cache /tmp/pytensor
 
 WORKDIR /app
 
-# Install dependencies first for layer caching
 COPY pyproject.toml README.md LICENSE ./
-COPY src/ ./src/
-RUN pip3 install --prefer-binary --no-cache-dir --upgrade '.[inference,data]'
+RUN mkdir -p src/stochtf && touch src/stochtf/__init__.py \
+ && pip install --prefer-binary '.[inference,data]' \
+ && pip uninstall -y stochtf
 
-# Copy the rest of the project
-COPY . .
-RUN chown -R appuser:appuser /app
+COPY --chown=appuser:appuser . .
+
+RUN pip install --no-deps -e . && chown -R appuser:appuser /app/src
 
 USER appuser
 
-# The previous entrypoint invoked `snakemake --snakefile multiparam_set.smk`,
-# but no Snakefile exists anywhere in the repository, so `docker run` failed
-# immediately. Default to a shell; run the scripts explicitly, e.g.
-#   docker run --rm -v $(pwd):/app stochtf python figures/fig01_burst_parameters.py
+RUN python -c "import stochtf"
+
 CMD ["/bin/bash"]

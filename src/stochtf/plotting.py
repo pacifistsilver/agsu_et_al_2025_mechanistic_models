@@ -1,9 +1,3 @@
-"""Figure style and output location, shared by every figure script.
-
-Scripts call use_paper_style() rather than each carrying their own rcParams
-block, so restyling the whole paper is one edit here.
-"""
-
 import os
 
 import matplotlib as mpl

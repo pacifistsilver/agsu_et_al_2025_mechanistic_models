@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite both the software and the paper."
+title: "stochtf: stochastic modelling of NANOG/SOX2 dynamics in gene expression noise"
+abstract: >-
+  Analytical, CME/FSP and stochastic-simulation code for two-site promoter
+  models of NANOG and SOX2, with ABC-SMC inference against allele-resolved
+  single-cell counts.
+type: software
+version: 1.0.0
+license: MIT
+repository-code: "https://github.com/pacifistsilver/Srinjan_Modelling"
+authors:
+  - family-names: Agsu
+    given-names: G. G.
+preferred-citation:
+  type: article
+  title: >-
+    Protein-protein interactions drive differences in the spatiotemporal
+    dynamics of transcription factors NANOG and SOX2 in naive pluripotent cells
+  authors:
+    - family-names: Agsu
+      given-names: G. G.
+  doi: "10.64898/2025.12.03.691924"
+  year: 2025
+  month: 12
