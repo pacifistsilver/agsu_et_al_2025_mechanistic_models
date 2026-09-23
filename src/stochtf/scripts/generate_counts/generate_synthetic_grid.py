@@ -1,8 +1,7 @@
 """Simulate heterodimer counts across the binding-rate grid used by fig_5.
 
 Output:
-``data/synthetic/heterodimer_grid.npz`` holding
-
+``data/synthetic/heterodimer_grid.npz`` 
     counts        (ngrid, ngrid, n_cells) int32, indexed [a_n, a_s, cell]
                   to match fig_5's meshgrid orientation
     alpha         the shared on-rate axis

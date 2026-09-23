@@ -1,5 +1,3 @@
-"""General burst frequency / size for ANY autonomous driver chain.
-"""
 import numpy as np
 from scipy.sparse import csc_matrix, identity
 from scipy.sparse.linalg import spsolve
@@ -43,23 +41,6 @@ def burst_stats(Q, kvec, gamma, mmax=4000):
     return f, b, pmf, (kvec * pi).sum() / gamma
 
 def rate_burst_stats(topology, a_s, a_n, k_y, b_s, b_n):
-    """(ON fraction, burst frequency, mean burst size) in closed form.
-
-    The same f and b as ``burst_stats``, for the two promoters the inference
-    layer fits, where the algebra closes: the OFF set is one silent state, so a
-    burst is a single excursion out of it, and every ON state emits at k_y.
-
-        tau_off = 1 / (a_s + a_n)   mean wait in the silent state
-        tau_on                      mean length of one excursion -- the only
-                                    part that differs between the topologies
-        f = 1 / (tau_on + tau_off)  cycles per unit time, i.e. the OFF -> ON flux
-        b = k_y tau_on              molecules made per excursion
-
-    so <y> = b f / gamma holds exactly here, not only in the bursty limit.
-    Rates are in units of gamma. The off-rates are arguments rather than
-    defaults because they are pinned by the inference layer, which sits above
-    this module.
-    """
     if a_s + a_n <= 0:
         return np.nan, np.nan, np.nan
     tau_off = 1.0 / (a_s + a_n)

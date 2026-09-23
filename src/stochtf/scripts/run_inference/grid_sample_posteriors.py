@@ -1,16 +1,5 @@
 """Refit a few grid points and keep the full posterior draws.
 
-``run_inference.py --grid`` stores only the summary matrices, which is what the
-maps in ``fig_9_model_selection`` need but not enough to show what a posterior
-at any single point actually looks like. This refits a handful of representative
-points -- the strongest evidence each way, the most undecided, and a typical one
--- and saves their draws so the figure can show the marginals against the values
-that generated the data.
-
-The refits use the same configuration as the sweep, including off-rates pinned
-to the ones the synthetic data was generated with, so the posteriors are
-comparable to the matrix rather than to a differently specified model.
-
 Usage
 -----
     python -m stochtf.scripts.grid_sample_posteriors

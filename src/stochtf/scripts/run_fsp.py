@@ -1,15 +1,6 @@
 """Solve a reaction network by Finite State Projection.
 
-Replaces simple_expand.py and support_expand.py, which were two copies of the
-same burr08 driver differing only in the expander.
-
-The promoter models delegate to the drivers already in the package
-(``stochtf.cme.fsp_heterodimer`` / ``fsp_homodimer``), which set up the recorder
-targets and projections each model needs.
-
-The old ``monomer.py`` is not carried over: it built ``heterodimer_model``
-despite its name, had its plotting commented out, and imported a module
-(``fsp_flux_util``) that is not in the repository, so it raised ImportError.
+Uses FSp from CME_fsp
 
 Usage
 -----
@@ -38,7 +29,7 @@ SIMPLE_EXPANDER_DEPTH = 3
 SUPPORT_EXPANDER_DEPTH = 1
 SUPPORT_EXPANDER_EPSILON = 1.0e-7
 
-#: Error budget for the solution at the final time.
+#: Error for the solution at the final time.
 EPSILON = 1.0e-2
 
 

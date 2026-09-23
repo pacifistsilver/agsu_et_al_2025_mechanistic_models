@@ -16,8 +16,6 @@ from stochtf.paths import SYNTHETIC_DATA_DIR
 from stochtf.ssa.fast import fast_ssa_dimer, fast_ssa_monomer
 
 #: Ground-truth rates, in units of gamma (so gamma = 1 and rates read as
-#: "per mRNA lifetime"). Slow switching and a large k_y put this in the bursty
-#: regime, where the promoter state leaves a visible signature in the counts.
 TRUE_PARAMS = {
     "alpha_s": 0.01,
     "beta_s": 0.06,
@@ -33,9 +31,7 @@ GATES = {"monomer": "ADD", "heterodimer": "OR", "telegraph": "OR"}
 #: Each SSA call returns 10 observations along one trajectory.
 OBS_PER_CELL = 10
 
-#: Site n is switched off to reduce the two-site promoter to a single site.
 SITE_OFF = 1e-9
-
 
 def truth_for(model):
     """(alpha_s, beta_s, alpha_n, beta_n, k_y) in units of gamma."""

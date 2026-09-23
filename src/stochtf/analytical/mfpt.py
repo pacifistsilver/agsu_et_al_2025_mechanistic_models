@@ -1,16 +1,3 @@
-"""Corrected mean ON duration for the heterodimer promoter.
-
-tbound() in heterodimer.py weights the MFPT-to-00 by the *stationary* occupancy
-of {10,01,11}.  The burst decomposition needs the *entry* distribution from 00
-instead, which is (a_s, a_n)/(a_s+a_n) onto (10, 01).  Stationary weighting
-over-counts state 11, which you can never enter the ON set through, so it
-inflates tau_ON.
-
-Renewal-reward pins it down in closed form:
-    p_bound = tau_ON / (tau_ON + tau_OFF),   tau_OFF = 1/(a_s + a_n)
-=>  tau_ON  = (1 - p00) / (p00 * (a_s + a_n)),      p00 = q_s q_n
-"""
-
 import numpy as np
 
 

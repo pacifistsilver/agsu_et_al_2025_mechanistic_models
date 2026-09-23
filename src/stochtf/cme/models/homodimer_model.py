@@ -2,8 +2,12 @@
 Homodimer Model CME Implementation
 """
 
+import os
+import sys
 import numpy as np
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "src")))
 from stochtf.ssa.params import homodimer_params
 from stochtf.cme import model
 

@@ -1,4 +1,58 @@
 """Stationary distributions by sFSP (Gupta, Mikelson & Khammash, 2017).
+
+The FSP implementation in :mod:`stochtf.cme.fsp` integrates p(t) forward from an
+initial state. That answers a different question from the one inference asks:
+the counts are snapshots of cells at steady state, so what is wanted is the
+*stationary* distribution, and integrating to it from t = 0 is slow and
+indirect.
+
+Truncating for a stationary solve is not as simple as truncating for a
+transient one. Classical FSP sends every transition that leaves the truncation
+into an absorbing state, and the only stationary distribution of *that* chain
+puts all its mass on the absorbing state -- useless. The common workaround is
+to zero the escaping propensities instead ("reflecting" truncation), which
+usually works but comes with no guarantee.
+
+sFSP keeps the escaping transitions and *redirects* them to a designated state
+inside the truncation, so the projected chain stays irreducible and has a
+genuine stationary distribution. Writing Q_n for the sub-generator on the
+truncated set E_n (diagonal still carrying the escaping rates) and c_n for the
+per-state outflow, the projected generator is
+
+    Qbar_n = Q_n + c_n b_l,                                            (3.14)
+
+with b_l the row vector selecting the designated state x_l -- that is, c_n is
+added to column l. Its rows sum to zero, so it is a valid generator.
+
+What that buys is an error certificate. Solving pi_n^T Qbar_n = 0 and taking
+
+    r_out = c_n^T pi_n,          gamma = r_out * ||E_n||_V             (3.15, 3.22)
+    ||E_n||_V = V(x_l) + max_{x in B(E_n)} V(x)                        (3.23)
+
+for a Foster-Lyapunov function V, Theorem 3.1 gives two-sided control,
+
+    M' gamma  <=  ||pi - pi_n||_V  <=  M gamma,
+
+so gamma is computable from the output and bounds the error you cannot compute.
+Algorithm 1 is then just: solve, evaluate gamma, expand the truncation, repeat.
+
+Reference: A. Gupta, J. Mikelson, M. Khammash, "A finite state projection
+algorithm for the stationary solution of the chemical master equation",
+J. Chem. Phys. 147, 154101 (2017); arXiv:1704.07259. Equation numbers above are
+that paper's.
+
+Specialisation here
+-------------------
+The chain is (promoter state, mRNA count): the promoter is a bounded species
+with a handful of states, mRNA is the single free species, so the state space
+has the E_b x N_0 form the paper assumes and the truncation is
+E_n = E_b x {0..y_max}. Only transcription escapes it (degradation at y = 0 has
+zero propensity), so c_n is supported on the top row of the grid.
+
+The generator is block-tridiagonal in y with blocks the size of the promoter,
+which the solve exploits: sweeping in y costs O(y_max) small solves instead of
+one large sparse factorisation, and that is what makes this fast enough to sit
+inside a sampler.
 """
 
 import numpy as np

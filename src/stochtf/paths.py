@@ -1,10 +1,6 @@
-"""Where everything lives on disk, resolved from the installed package."""
-
 import os
 
-# src/stochtf/paths.py -> repo root, so three levels up.
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 DATA_DIR = os.path.join(ROOT, "data")
 RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
 PROCESSED_DATA_DIR = os.path.join(DATA_DIR, "processed")
@@ -14,20 +10,14 @@ FIGURE_DIR = os.path.join(ROOT, "figures", "output")
 
 
 def processed(name):
-    """Path to a per-gene count array, e.g. processed('sox2.npy')."""
     return os.path.join(PROCESSED_DATA_DIR, name)
 
 def synthetic(name):
-    """Same, but for the simulated sweeps under data/synthetic/."""
     return os.path.join(SYNTHETIC_DATA_DIR, name)
 
-
 def raw(name):
-    """Path to a downloaded file under data/raw/."""
     return os.path.join(RAW_DATA_DIR, name)
 
-
 def results(name):
-    """Path under results/. Makes the directory if it isn't there yet."""
     os.makedirs(RESULTS_DIR, exist_ok=True)
     return os.path.join(RESULTS_DIR, name)

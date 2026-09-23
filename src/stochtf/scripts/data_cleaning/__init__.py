@@ -25,22 +25,16 @@ from stochtf.paths import DATA_DIR, PROCESSED_DATA_DIR, RAW_DATA_DIR, processed
 
 GEO_BASE = "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE132nnn/GSE132589/suppl/"
 
-# allele -> (filename once decompressed, expected SHA256). The checksums are
-# None until someone records them: `shasum -a 256 data/raw/*.txt`, then paste
-# them in and commit.
 RAW_FILES = {
     "129": ("GSE132589_ASEcount_G1_129.txt", None),
     "CAST": ("GSE132589_ASEcount_G1_CAST.txt", None),
 }
 
-# data/raw first, so a fresh download wins over the copy committed to the repo.
 SEARCH_DIRS = [os.path.join(DATA_DIR, "raw"), os.path.join(DATA_DIR, "ochiai")]
 
-# Goes into every .npz we write, so whoever loads one knows the layout.
 ALLELE_NOTE = ("counts_<allele>[g, c] is gene genes[g] in cell cells[c]; "
                "alleles are separate realisations, concatenate to fit")
 
-# Contemporary with the deposit, so the transcript ids in the tables resolve.
 GTF_URL = ("https://ftp.ensembl.org/pub/release-96/gtf/mus_musculus/"
            "Mus_musculus.GRCm38.96.gtf.gz")
 GTF_CACHE = os.path.join(DATA_DIR, "raw", "Mus_musculus.GRCm38.96.gtf.gz")
@@ -49,9 +43,6 @@ _TRANSCRIPT = re.compile(r'transcript_id "([^"]+)"')
 _GENE_NAME = re.compile(r'gene_name "([^"]+)"')
 _GENE_ID = re.compile(r'gene_id "([^"]+)"')
 
-# Retired or renamed symbols -> the release-96 name carrying the same Ensembl
-# gene id. Each was resolved through the Ensembl xrefs endpoint and checked
-# against the release-96 GTF; the gene id is here so you can re-check it.
 ALIASES = {
     "6330407J23Rik": "Soga3",    # ENSMUSG00000038916
     "Ppap2a": "Plpp1",           # ENSMUSG00000021759
@@ -68,12 +59,7 @@ ALIASES = {
 }
 
 
-# ---------------------------------------------------------------------------
-# shared helpers
-# ---------------------------------------------------------------------------
-
 def raw_url(filename):
-    """GEO download URL for one of the decompressed filenames in RAW_FILES."""
     return GEO_BASE + filename + ".gz"
 
 
@@ -98,10 +84,6 @@ def gene_stats(vector):
 
 def write_gene_npy(name, counts_129, counts_cast, row):
     """Save one gene to processed/<gene>.npy, both alleles concatenated.
-
-    Concatenated and not summed: the two alleles are independent realisations
-    of the same promoter, so stacking them doubles the sample instead of
-    averaging the noise away.
     """
     vector = np.concatenate([counts_129[row], counts_cast[row]])
     os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
@@ -109,10 +91,6 @@ def write_gene_npy(name, counts_129, counts_cast, row):
     np.save(path, vector)
     return path, vector
 
-
-# ---------------------------------------------------------------------------
-# step 1: download
-# ---------------------------------------------------------------------------
 
 def sha256(path, chunk=1 << 20):
     digest = hashlib.sha256()
@@ -163,15 +141,8 @@ def step_download(args):
         sys.exit(1)
 
 
-# ---------------------------------------------------------------------------
-# step 2: prepare
-# ---------------------------------------------------------------------------
-
 def read_allele_table(path):
     """(transcript ids, cell names, counts) from one allele table.
-
-    The header is read by hand because it is one field short of every data
-    row; letting the CSV reader infer names from it misaligns every column.
     """
     import polars as pl
 
@@ -203,8 +174,6 @@ def transcript_to_gene(cache=GTF_CACHE, url=GTF_URL):
         for line in fh:
             if line.startswith("#"):
                 continue
-            # transcript_id appears on every feature of a transcript; one hit
-            # per transcript is enough, so skip lines already covered.
             found = _TRANSCRIPT.search(line)
             if not found or found.group(1) in mapping:
                 continue
@@ -283,10 +252,6 @@ def step_prepare(args):
               f"Fano={fano:.2f} -> {path}")
 
 
-# ---------------------------------------------------------------------------
-# step 3: extract
-# ---------------------------------------------------------------------------
-
 def resolve(symbol, present, lookup):
     """(name in the table, how it was matched) or (None, reason)."""
     if symbol in present:
@@ -325,7 +290,7 @@ def step_extract(args):
         if name is None:
             missing.append((symbol, how))
             continue
-        if name in names:                      # two aliases of the same gene
+        if name in names: # two aliases of the same gene
             notes.append(f"{symbol} duplicates {name}, kept once")
             continue
         rows.append(index[name])
@@ -366,11 +331,6 @@ def step_extract(args):
         for k, name in enumerate(names):
             write_gene_npy(name, sub129, subcast, k)
         print(f"Wrote {len(names)} per-gene .npy files to {PROCESSED_DATA_DIR}")
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 def build_parser():
     import argparse

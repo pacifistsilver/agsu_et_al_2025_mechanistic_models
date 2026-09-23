@@ -1,25 +1,5 @@
 """Fit the joint monomer/heterodimer model to every gene in a panel.
 
-For each gene the topology is a sampled parameter, so one run returns
-P(heterodimer | counts) and a Bayes factor alongside the rate posteriors. See
-``stochtf.inference.models.JointModel``.
-
-Two things are handled per gene rather than assumed.
-
-Allele structure. A cell carries two copies and the assay reports them
-separately, so the two are concatenated into 2 x n_cells independent
-realisations of one promoter. Genes with no signal at all on one allele are the
-exception: in a male F1 line the X-linked genes have a single copy, and
-concatenating would append n_cells structural zeros that a promoter model reads
-as an enormous OFF fraction. Those are fitted on the expressed allele alone.
-
-Signal. Genes whose mean count is below ``--min-mean`` are skipped; a promoter
-model fitted to counts that are almost all zero is not estimating switching
-rates, it is estimating nothing.
-
-Results are written after every gene, and an existing results file is read back
-on startup so an interrupted run resumes where it stopped.
-
 Usage
 -----
     python -m stochtf.scripts.run_gene_panel --panel data/processed/ochiai_panel_counts.npz

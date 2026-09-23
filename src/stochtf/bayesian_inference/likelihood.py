@@ -2,7 +2,6 @@
 
 We have the stationary distribution exactly (analytical/pgf.py), so for iid
 counts the likelihood is just log L(theta) = sum_i log P(y_i | theta)
-
 """
 
 import numpy as np
@@ -31,10 +30,6 @@ def prepare_counts(counts):
 def log_likelihood(counts, a_s, b_s, a_n, b_n, k_y, gamma, model="dimer",
                    y_max=None):
     """Exact log-likelihood of iid stationary counts.
-
-    counts are molecule numbers, one per cell. 
-
-    Parameters outside the model's support give -inf rather than an exception. 
     """
     y = prepare_counts(counts)
 
@@ -65,10 +60,6 @@ def log_likelihood(counts, a_s, b_s, a_n, b_n, k_y, gamma, model="dimer",
 
 def log_likelihood_factory(counts, model="dimer", k_y=None, gamma=None):
     """Build f(a_s, a_n, b_s, b_n, ...) -> float bound to fixed data.
-
-    Argument order follows the priors in models.py (alpha_s, alpha_n, beta_s,
-    beta_n), which is not the order log_likelihood wants. Swapping it here once
-    beats getting it wrong at every call site.
     """
     y = prepare_counts(counts)
     fixed = k_y is not None and gamma is not None

@@ -1,16 +1,8 @@
-"""Monomer model: SOX2 and NANOG bind independently, neither dimerises.
-
-State vector is ``[nf, sf, nb, sb, y]`` -- free and bound NANOG, free and bound
-SOX2, and mRNA.
-"""
-
 from stochtf.ssa.params import monomer_params
 
 params, initial_state, stoichiometry = monomer_params
 
-#: Indices of the state vector that count as promoter occupancy.
 PROMOTER_IDX = [2, 3]
-#: Index of the mRNA species.
 MRNA_IDX = 4
 
 

@@ -1,18 +1,5 @@
 """Tabulate the inferred rates from a panel of joint fits.
 
-Reads the checkpoint written by ``stochtf.scripts.run_gene_panel`` and reports, per
-gene, the posterior median and 94% interval for each free rate, together with
-the burst statistics those rates imply. Works on a partial file, so it can be
-run while the panel is still going.
-
-Rates are in units of the mRNA degradation rate gamma: stationary counts fix
-only the ratios, so multiply by a measured gamma to get absolute units. The two
-off-rates are not inferred -- they are pinned, and their values are shown for
-reference since every derived quantity depends on them.
-
-Burst statistics are computed under whichever topology the fit favours, since
-tau_on differs between them, and the column says which was used.
-
 Usage
 -----
     python -m stochtf.scripts.report_panel

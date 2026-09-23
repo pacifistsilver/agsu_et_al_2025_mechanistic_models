@@ -1,19 +1,9 @@
-"""Homodimer model: two equivalent NANOG sites on the same promoter.
-
-State vector is ``[n00, n10, n01, n11, y]`` -- the four promoter occupancy
-compartments and mRNA. Because the two sites are equivalent, both routes out of
-n11 carry the same rate ``beta_n * n11``.
-"""
-
 from stochtf.ssa.params import homodimer_params
 
 params, initial_state, stoichiometry = homodimer_params
 
-#: Indices of the state vector that count as promoter occupancy.
 PROMOTER_IDX = [1, 2, 3]
-#: Index of the mRNA species.
 MRNA_IDX = 4
-
 
 def propensity_fn(state, p_params):
     n00, n10, n01, n11, y = state

@@ -1,19 +1,9 @@
-"""Heterodimer model: distinct SOX2 and NANOG sites on the same promoter.
-
-State vector is ``[n00, n10, n01, n11, y]`` -- the four promoter occupancy
-compartments and mRNA. Site s flips at (alpha_s, beta_s), site n at
-(alpha_n, beta_n); mRNA is made whenever at least one site is bound.
-"""
-
 from stochtf.ssa.params import heterodimer_params
 
 params, initial_state, stoichiometry = heterodimer_params
 
-#: Indices of the state vector that count as promoter occupancy.
 PROMOTER_IDX = [1, 2, 3]
-#: Index of the mRNA species.
 MRNA_IDX = 4
-
 
 def propensity_fn(state, p_params):
     n00, n10, n01, n11, y = state

@@ -1,7 +1,3 @@
-"""
-Parameters for stochastic simulations for monomer, heterodimer, and homodimer models.
-"""
-
 from stochtf.ssa import gillespie as gil
 
 heterodimer_params = [

@@ -1,8 +1,3 @@
-"""FSP driver for the homodimer promoter model.
-
-Sets up the recorder targets and projection the model needs, then solves
-to a fixed error bound with support-based domain expansion.
-"""
 
 from stochtf.cme.models import homodimer_model
 
@@ -16,36 +11,47 @@ from stochtf.cme import fsp_example_util
 
 from stochtf import cme
 def main():
-    """Solves the homodimer model by FSP with support-based expansion."""
+    """
+    solve heterodimer_model model using FSP with better expansion approach
+    """
     
+    # create model and initial states for domain
     model = homodimer_model.create_model()
     initial_states = cme.domain.from_iter((model.initial_state, ))
     
-    # SolutionExpander grows the domain only around the support of the
-    # current solution, rather than expanding everywhere.
+    # Create expander for FSP expansion strategy.
+    # The SolutionExpander only expands states around the
+    # support of the current solution, instead of
+    # expanding the entire domain
     expander = cme.fsp.support_expander.SupportExpander(
         model.transitions,
         depth = 10,
         epsilon = 1.0e-7
     )
     
-    # Time dependencies for the burr08 model are supplied too.
+    # create fsp solver for model, initial states, expander
+    # - time dependencies for the burr08 model are also supplied
     fsp_solver = cme.fsp.solver.create(
         model,
         initial_states,
         expander
     )
     
-    # Initially stiff, so start with fine steps and coarsen later.
+    # define time steps:
+    # this problem is initially stiff so
+    # we begin with some finer time steps
+    # before changing to coarser steps
     time_steps = numpy.linspace(1, 50, 50)
     
     
-    # Bound the error of the final solution by epsilon.
+    # we want the error of the solution at the
+    # final time to be bounded by epsilon
     epsilon = 1.0e-2
     num_steps = numpy.size(time_steps)
-    # Per-step error budget.
+    # define how much error is tolerated per step
     max_error_per_step = epsilon / num_steps
     
+    # create recorder to record species counts
     recorder = cme.recorder.create(
         (model.species, model.species_counts)
     )
@@ -61,9 +67,10 @@ def main():
         fsp_solver.step(t, max_error_per_step)
         if i % 3 == 0:
             print('recording solution and domain')
+            # record the solution
             p, _ = fsp_solver.y
             recorder.write(t, p)
-            # Copy the domain so it can be plotted afterwards.
+            # store a copy of the domain so we can plot it later
             domains.append(numpy.array(fsp_solver.domain_states))
     print('OK')
     

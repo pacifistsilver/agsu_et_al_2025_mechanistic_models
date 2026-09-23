@@ -1,5 +1,3 @@
-"""Heterodimer promoter with mRNA production and degradation.
-"""
 
 import numpy as np
 
@@ -7,19 +5,6 @@ import numpy as np
 # p00 -> p10, p00 -> p01
 
 def derived(a_s: np.float64, b_s: np.float64, a_n: np.float64, b_n: np.float64) -> tuple:
-    """Returns the per-site switching rates and occupancies.
-
-    Args:
-        a_s: SOX2 binding rate, concentration dependent.
-        b_s: SOX2 unbinding rate.
-        a_n: NANOG binding rate, concentration dependent.
-        b_n: NANOG unbinding rate.
-
-    Returns:
-        A tuple (lambda_s, lambda_n, p_s, p_n, q_s, q_n): the total
-        switching rate of each site, then the bound and free probabilities
-        of each, treating the sites on their own.
-    """
     lam_s, lam_n = a_s + b_s, a_n + b_n
     p_s1, p_n1 = a_s / lam_s, a_n / lam_n
     p_s0 = b_s / lam_s
@@ -286,9 +271,7 @@ def burst_size_pgf(w, a_s, b_s, a_n, b_n, k_y):
     return (a_s * phi10 + a_n * phi01) / (a_s + a_n)
 
 
-# ----------------------------------------------------------------------
-# 4. Gillespie validation of the burst statistics
-# ----------------------------------------------------------------------
+# Gillespie validation of the burst statistics
 
 
 def gillespie_bursts(a_s, b_s, a_n, b_n, k_y, n_bursts=20000, seed=0):
@@ -333,9 +316,7 @@ def gillespie_bursts(a_s, b_s, a_n, b_n, k_y, n_bursts=20000, seed=0):
     return durations, sizes, off_times
 
 
-# ----------------------------------------------------------------------
-# 5. exact stationary P(y) by finite state projection (validates the Fano)
-# ----------------------------------------------------------------------
+# exact stationary P(y) by finite state projection (validates the Fano)
 
 
 def fsp_stationary(a_s, b_s, a_n, b_n, k_y, gamma, ymax=400):
